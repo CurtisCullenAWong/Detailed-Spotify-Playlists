@@ -1,0 +1,3396 @@
+import React, { useState, useRef, useEffect } from "react";
+import {
+  Home,
+  Search,
+  Library,
+  ListMusic,
+  Heart,
+  Plus,
+  Play,
+  Pause,
+  Music2,
+  RefreshCw,
+  Columns3,
+  Trash2,
+  SkipBack,
+  SkipForward,
+  Shuffle,
+  Repeat,
+  Volume2,
+  Zap,
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  X,
+  Check,
+  Clock,
+  MoreHorizontal,
+  Code2,
+  TrendingUp,
+  Mic2,
+  RadioTower,
+  Laptop2,
+  Grid3x3,
+  Grid2x2,
+  Rows3,
+  ArrowUpDown,
+  LogOut,
+} from "lucide-react";
+
+import { Toaster, toast } from "sonner";
+
+// Import data from centralized data directory
+import {
+  TRACKS as STATIC_TRACKS,
+  PLAYLISTS as STATIC_PLAYLISTS,
+  LIKED_SONGS_COUNT as STATIC_LIKED_SONGS_COUNT,
+  TOP_ARTISTS as STATIC_TOP_ARTISTS,
+  RECENTLY_PLAYED as STATIC_RECENTLY_PLAYED,
+  API_SECTIONS,
+  BROWSE_CATEGORIES,
+  ALL_COLUMNS,
+  GROUP_BY_LABELS,
+  SEARCH_FILTERS,
+  KEY_DATA_INDICATORS,
+  ALL_ARTISTS as STATIC_ALL_ARTISTS,
+} from "../data";
+import type { Track, Playlist, Artist, GroupByOption, ApiEndpoint } from "../data";
+import { loadPreferences, savePreferences, PreferenceUpdaters } from "../utils/userPreferences";
+import { isAuthenticatedSync, handleRedirectCallback, logout, login } from "../utils/spotifyAuth";
+import {
+  getCurrentUser,
+  getUserPlaylists,
+  getPlaylistTracks,
+  getMultiPlaylistTracks,
+  getLikedSongsCount,
+  getRecentlyPlayed,
+  getTopArtists,
+  searchSpotify,
+  getPlayerState,
+  playTrack,
+  pauseTrack,
+  skipToNext,
+  skipToPrevious,
+  setPlayerVolume,
+  seekPosition,
+  toggleShuffle,
+  toggleRepeat,
+  addTracksToPlaylist,
+  removeTracksFromPlaylist,
+  getPlaylistSnapshotId,
+  reorderPlaylistTracks,
+  spotifyFetch,
+  setDeprecatedApisEnabled,
+} from "../utils/spotifyApi";
+import Login from "./components/Login";
+import { ImageWithFallback } from "./components/figma/ImageWithFallback";
+
+const getInitials = (name: string) => {
+  if (!name) return "SP";
+  const parts = name.split(" ");
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+};
+
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Page = "dashboard" | "workspace" | "api" | "search" | "libraries";
+
+// ─── Method Badge ─────────────────────────────────────────────────────────────
+
+function MethodBadge({ method }: { method: string }) {
+  const colors: Record<string, string> = {
+    GET: "bg-emerald-900/60 text-emerald-400 border-emerald-800",
+    POST: "bg-blue-900/60 text-blue-400 border-blue-800",
+    PUT: "bg-amber-900/60 text-amber-400 border-amber-800",
+    DELETE: "bg-red-900/60 text-red-400 border-red-800",
+  };
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border font-mono ${colors[method] ?? "bg-[#282828] text-[#B3B3B3]"}`}>
+      {method}
+    </span>
+  );
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+
+function Sidebar({
+  page,
+  setPage,
+  collapsed,
+  onToggleCollapse,
+  playlists,
+  likedSongsCount,
+  selectedPlaylistId,
+  setSelectedPlaylistId,
+  currentUser,
+}: {
+  page: Page;
+  setPage: (p: Page) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  playlists: Playlist[];
+  likedSongsCount: number;
+  selectedPlaylistId: string | number;
+  setSelectedPlaylistId: (id: string | number) => void;
+  currentUser: any;
+}) {
+  const preferences = loadPreferences();
+  const [libraryDropdownOpen, setLibraryDropdownOpen] = useState(false);
+  const [selectedLibraryView, setSelectedLibraryView] = useState<"all" | "yours" | "followed">(preferences.libraryView);
+  const libraryDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Save library view preference when it changes
+  useEffect(() => {
+    PreferenceUpdaters.setLibraryView(selectedLibraryView);
+  }, [selectedLibraryView]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (libraryDropdownRef.current && !libraryDropdownRef.current.contains(e.target as Node)) {
+        setLibraryDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const NAV = [
+    { icon: Home, label: "Home", id: "dashboard" as Page },
+    { icon: Search, label: "Search", id: "search" as Page },
+  ];
+
+  // Filter playlists based on selected view
+  const filteredPlaylists =
+    selectedLibraryView === "all"
+      ? playlists
+      : playlists.filter(pl => pl.owner === selectedLibraryView);
+
+  if (collapsed) {
+    return (
+      <aside className="hidden md:flex flex-col h-full w-[60px] shrink-0 bg-[#000000] select-none items-center py-4 gap-2 overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <button onClick={onToggleCollapse} className="w-9 h-9 flex items-center justify-center rounded-full bg-[#1DB954] mb-2 shrink-0 hover:scale-105 transition-transform">
+          <Music2 size={16} className="text-black" />
+        </button>
+        {NAV.map(({ icon: Icon, label, id }) => (
+          <button key={label} onClick={() => setPage(id)} title={label}
+            className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${id === page ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+            <Icon size={18} />
+          </button>
+        ))}
+
+        {/* Separator */}
+        <div className="w-6 h-px bg-[#282828] my-1" />
+
+        {/* Liked Songs Icon */}
+        <button
+          onClick={() => { setSelectedPlaylistId("liked"); setPage("workspace"); }}
+          title="Liked Songs"
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-[#450af5] to-[#c4efd9] hover:brightness-110 shrink-0 ${selectedPlaylistId === "liked" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          <Heart size={14} className="text-white fill-white" />
+        </button>
+
+        {/* All My Songs Icon */}
+        <button
+          onClick={() => { setSelectedPlaylistId("all_my"); setPage("workspace"); }}
+          title="All My Songs"
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-blue-600 to-indigo-700 hover:brightness-110 shrink-0 ${selectedPlaylistId === "all_my" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          <ListMusic size={14} className="text-white" />
+        </button>
+
+        {/* All Followed Songs Icon */}
+        <button
+          onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
+          title="All Followed Songs"
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          <RadioTower size={14} className="text-white" />
+        </button>
+
+        {/* All Songs Icon */}
+        <button
+          onClick={() => { setSelectedPlaylistId("all_songs"); setPage("workspace"); }}
+          title="All Songs"
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-emerald-600 to-teal-700 hover:brightness-110 shrink-0 ${selectedPlaylistId === "all_songs" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          <Music2 size={14} className="text-white" />
+        </button>
+
+        {/* Playlist Icons - scrollable */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden w-full flex flex-col items-center gap-2 px-1.5 no-scrollbar">
+          {filteredPlaylists.map((pl) => (
+            <button
+              key={pl.id}
+              onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
+              title={pl.name}
+              className={`w-9 h-9 rounded-md shrink-0 hover:brightness-110 transition-all ${selectedPlaylistId === pl.id ? "ring-2 ring-[#1DB954]" : ""}`}
+              style={pl.cover.startsWith("http") ? { backgroundImage: `url(${pl.cover})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
+            >
+              {!pl.cover.startsWith("http") && <div className={`w-full h-full rounded-md ${pl.cover}`} />}
+            </button>
+          ))}
+        </div>
+
+        <div className="h-px w-6 bg-[#282828] my-1" />
+        <button onClick={() => setPage("api")} title="API Reference"
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${page === "api" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+          <Code2 size={18} />
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="hidden md:flex flex-col h-full w-[260px] shrink-0 bg-[#000000] select-none overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Brand */}
+      <div className="px-6 pt-6 pb-4">
+        <div className="flex items-center gap-2">
+          <button onClick={onToggleCollapse} className="w-8 h-8 rounded-full bg-[#1DB954] flex items-center justify-center shrink-0 hover:scale-105 transition-transform">
+            <Music2 size={16} className="text-black" />
+          </button>
+          <span className="text-white font-bold text-[15px] tracking-tight">Spotify Manager</span>
+          <button onClick={onToggleCollapse} className="ml-auto text-[#B3B3B3] hover:text-white transition-colors p-1 rounded hover:bg-[#282828]">
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Primary Nav */}
+      <nav className="px-3 space-y-0.5">
+        {NAV.map(({ icon: Icon, label, id }) => (
+          <button key={label} onClick={() => setPage(id)}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${id === page ? "text-white bg-[#1a1a1a]" : "text-[#B3B3B3] hover:text-white"}`}>
+            <Icon size={20} className={id === page ? "text-white" : "text-[#B3B3B3]"} />
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Library Panel */}
+      <div className="mt-4 mx-3 rounded-lg bg-[#121212] flex-1 overflow-hidden flex flex-col">
+        <div ref={libraryDropdownRef} className="flex items-center gap-1 px-2 py-2 relative">
+          <button
+            onClick={() => setLibraryDropdownOpen(o => !o)}
+            className="flex items-center gap-1 flex-1 min-w-0 text-[#B3B3B3] hover:text-white transition-colors group">
+            <Library size={11} className="shrink-0" />
+            <span className="text-[10px] font-bold uppercase tracking-widest mr-auto truncate">
+              {selectedLibraryView === "yours" ? "My Playlists" : selectedLibraryView === "all" ? "All Playlists" : "Followed Playlists"}
+            </span>
+            <ChevronDown size={11} className={`shrink-0 transition-transform ${libraryDropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+          <div className="relative">
+            {libraryDropdownOpen && (
+              <div className="absolute top-full right-0 mt-1 w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+                {[
+                  { key: "yours" as const, label: "My Playlists" },
+                  { key: "all" as const, label: "All Playlists" },
+                  { key: "followed" as const, label: "Followed Playlists" }
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setSelectedLibraryView(key);
+                      setLibraryDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors text-left ${selectedLibraryView === key ? "text-[#1DB954]" : "text-[#B3B3B3]"
+                      }`}>
+                    {label}
+                    {selectedLibraryView === key && <Check size={10} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <LibraryPlaylists
+          onOpen={() => setPage("workspace")}
+          selectedView={selectedLibraryView}
+          playlists={playlists}
+          likedSongsCount={likedSongsCount}
+          selectedPlaylistId={selectedPlaylistId}
+          setSelectedPlaylistId={setSelectedPlaylistId}
+        />
+
+        {/* API Reference link */}
+        <div className="px-3 pb-2">
+          <div className="h-px bg-[#282828] mb-2" />
+          <button onClick={() => setPage("api")}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${page === "api" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+            <Code2 size={14} />
+            API Reference
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+// ─── Page 1: Dashboard ────────────────────────────────────────────────────────
+
+function Dashboard({
+  setPage,
+  currentUser,
+  playlists,
+  likedSongsCount,
+  recentlyPlayed,
+  topArtists,
+  selectedPlaylistId,
+  setSelectedPlaylistId,
+  playbackState,
+  enableDeprecatedApis,
+  onToggleDeprecatedApis,
+}: {
+  setPage: (p: Page) => void;
+  currentUser: any;
+  playlists: Playlist[];
+  likedSongsCount: number;
+  recentlyPlayed: any[];
+  topArtists: Artist[];
+  selectedPlaylistId: string | number;
+  setSelectedPlaylistId: (id: string | number) => void;
+  playbackState: any;
+  enableDeprecatedApis: boolean;
+  onToggleDeprecatedApis: () => void;
+}) {
+  const [hoveredPlaylist, setHoveredPlaylist] = useState<string | number | null>(null);
+  const preferences = loadPreferences();
+  const [libraryView, setLibraryView] = useState<"all" | "yours" | "followed">(preferences.libraryView);
+  const [headerDropdownOpen, setHeaderDropdownOpen] = useState(false);
+  const headerDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    PreferenceUpdaters.setLibraryView(libraryView);
+  }, [libraryView]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (headerDropdownRef.current && !headerDropdownRef.current.contains(e.target as Node)) {
+        setHeaderDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const libraryViewLabels = { all: "All Playlists", yours: "My Playlists", followed: "Followed" };
+
+  const filteredPlaylists =
+    libraryView === "all"
+      ? playlists
+      : playlists.filter(pl => pl.owner === libraryView);
+
+  const activeDevice = playbackState?.device?.name || "None";
+  const indicators = [
+    { label: "Total Playlists", value: playlists.length.toString(), sub: "User & followed collections", color: "text-[#1DB954]" },
+    { label: "Saved Songs", value: likedSongsCount.toLocaleString(), sub: "In your Liked Songs library", color: "text-violet-400" },
+    { label: "Active Device", value: activeDevice, sub: playbackState?.device?.type || "No active device", color: activeDevice !== "None" ? "text-emerald-400" : "text-[#B3B3B3]" },
+    { label: "Playback Status", value: playbackState?.is_playing ? "Playing" : "Stopped", sub: playbackState?.item ? playbackState.item.name : "No active track", color: playbackState?.is_playing ? "text-amber-400" : "text-[#B3B3B3]" },
+  ];
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gradient-to-b from-[#1a1a2e] via-[#121212] to-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Top bar */}
+      <div className="sticky top-0 z-10 flex items-center justify-between px-4 md:px-8 py-3 md:py-4 bg-gradient-to-b from-[#1a1a2e]/95 to-transparent backdrop-blur-sm">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-white text-[18px] md:text-[22px] font-bold truncate">
+            {(() => {
+              const hour = new Date().getHours();
+              const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+              return `${greeting}, ${currentUser?.displayName || "Guest"}`;
+            })()}
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Deprecated API Toggle */}
+          <button
+            onClick={onToggleDeprecatedApis}
+            title={enableDeprecatedApis
+              ? "Audio features & genre enrichment ON (deprecated Spotify endpoints active)"
+              : "Audio features & genre enrichment OFF (safe mode — deprecated endpoints skipped)"}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all duration-200 cursor-pointer select-none ${
+              enableDeprecatedApis
+                ? "bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25"
+                : "bg-[#282828] border-[#383838] text-[#535353] hover:border-[#535353] hover:text-[#B3B3B3]"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full transition-colors ${enableDeprecatedApis ? "bg-amber-400" : "bg-[#535353]"}`} />
+            <span className="hidden sm:inline">{enableDeprecatedApis ? "Audio Features ON" : "Audio Features OFF"}</span>
+            <span className="sm:hidden">{enableDeprecatedApis ? "AF" : "AF"}</span>
+          </button>
+
+          <div className="flex items-center gap-3 relative group">
+            <button className="flex items-center gap-2 bg-[#181818] rounded-full px-3 py-1.5 hover:scale-105 transition-transform border border-white/5 cursor-pointer">
+              {currentUser?.imageUrl ? (
+                <img src={currentUser.imageUrl} className="w-6 h-6 rounded-full object-cover" alt="" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center text-[10px] font-bold text-white">
+                  {getInitials(currentUser?.displayName || "Guest")}
+                </div>
+              )}
+              <span className="text-white text-[13px] font-semibold hidden sm:inline">
+                {currentUser?.displayName || "Spotify User"}
+              </span>
+              <ChevronDown size={14} className="text-[#B3B3B3]" />
+            </button>
+            {/* Dropdown Menu for Logout */}
+            <div className="absolute right-0 top-full mt-2 w-36 bg-[#282828] border border-[#383838] rounded-lg shadow-2xl py-1 hidden group-hover:block hover:block z-50">
+              <button
+                onClick={logout}
+                className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-[#383838] hover:text-red-300 font-semibold transition-colors flex items-center gap-2"
+              >
+                <LogOut size={12} />
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 md:px-8 pb-8 md:pb-10 -mt-2">
+        {/* Key Data Indicators */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mx-[0px] my-[28px]">
+          {indicators.map((s) => (
+            <div key={s.label} className="bg-[#181818] rounded-lg p-3 md:p-4 border border-white/5">
+              <p className="text-[#B3B3B3] text-[10px] md:text-[11px] uppercase tracking-widest font-semibold">{s.label}</p>
+              <p className={`text-[22px] md:text-[26px] font-bold mt-1 truncate ${s.color}`}>{s.value}</p>
+              <p className="text-[#B3B3B3] text-[11px] md:text-[12px] mt-1 truncate">{s.sub}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Recently Played */}
+        <div className="mb-6 md:mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white text-[16px] md:text-[18px] font-bold">Recently Played</h2>
+          </div>
+          {recentlyPlayed.length === 0 ? (
+            <div className="text-[#535353] text-sm py-4">No recently played tracks found.</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 md:gap-3">
+              {recentlyPlayed.map((item, i) => (
+                <button
+                  key={i}
+                  onClick={() => playTrack({ uris: [item.uri] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                  className="group flex items-center gap-3 bg-[#181818] hover:bg-[#282828] rounded-md overflow-hidden pr-3 transition-all text-left cursor-pointer"
+                >
+                  <div className="w-14 h-14 shrink-0 flex items-center justify-center bg-[#282828]">
+                    {item.cover.startsWith("http") ? (
+                      <img src={item.cover} className="w-full h-full object-cover" alt="" />
+                    ) : (
+                      <Music2 size={18} className="text-white/60" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-white text-[13px] font-semibold truncate">{item.title}</p>
+                    <p className="text-[#B3B3B3] text-[11px] truncate">{item.ago}</p>
+                  </div>
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                      <Play size={12} className="text-black fill-black ml-0.5" />
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Top Artists */}
+        <div className="mb-6 md:mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white text-[16px] md:text-[18px] font-bold flex items-center gap-2"><TrendingUp size={18} className="text-[#1DB954]" /> Your Top Artists</h2>
+          </div>
+          {topArtists.length === 0 ? (
+            <div className="text-[#535353] text-sm py-4">No top artists found.</div>
+          ) : (
+            <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#282828] scrollbar-track-transparent">
+              {topArtists.map((artist, i) => (
+                <div key={i} className="group flex flex-col items-center gap-3 shrink-0 cursor-pointer">
+                  <div className="relative w-24 h-24 rounded-full flex items-center justify-center shadow-lg bg-[#282828] overflow-hidden">
+                    {artist.cover.startsWith("http") ? (
+                      <img src={artist.cover} className="w-full h-full object-cover rounded-full" alt="" />
+                    ) : (
+                      <Mic2 size={28} className="text-white/70" />
+                    )}
+                    <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Play size={22} className="text-white fill-white ml-0.5" />
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-white text-[13px] font-semibold truncate max-w-[100px]">{artist.name}</p>
+                    <p className="text-[#B3B3B3] text-[11px] truncate max-w-[100px]">{artist.genre}</p>
+                    <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} score</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Curated Playlists */}
+        <div className="mb-6 md:mb-8">
+          <div className="flex items-center justify-between mb-4 md:mb-5">
+            <div ref={headerDropdownRef} className="relative">
+              <button
+                onClick={() => setHeaderDropdownOpen(o => !o)}
+                className="flex items-center gap-1.5 text-white text-[16px] md:text-[18px] font-bold hover:text-[#B3B3B3] transition-colors cursor-pointer">
+                {libraryViewLabels[libraryView]}
+                <ChevronDown size={16} className={`transition-transform mt-0.5 ${headerDropdownOpen ? "rotate-180" : ""}`} />
+              </button>
+              {headerDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 w-44 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1">
+                  {([
+                    { key: "all" as const, label: "All Playlists" },
+                    { key: "yours" as const, label: "My Playlists" },
+                    { key: "followed" as const, label: "Followed Playlists" },
+                  ] as const).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => { setLibraryView(key); setHeaderDropdownOpen(false); }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors text-left ${libraryView === key ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
+                      {label}
+                      {libraryView === key && <Check size={10} />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-3 md:gap-5 overflow-x-auto pb-4">
+            {/* Liked Songs - Conditionally rendered */}
+            {likedSongsCount > 0 && (
+              <button onClick={() => { setSelectedPlaylistId("liked"); setPage("workspace"); }}
+                onMouseEnter={() => setHoveredPlaylist("liked")} onMouseLeave={() => setHoveredPlaylist(null)}
+                className="group flex flex-col gap-3 p-3 rounded-lg bg-gradient-to-br from-[#450af5] to-[#c4efd9] hover:brightness-110 transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
+                <div className="relative w-full aspect-square rounded-md overflow-hidden bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
+                  <Heart size={48} className="text-white fill-white" />
+                  <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === "liked" ? "opacity-100" : "opacity-0"}`}>
+                    <div className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200">
+                      <Play size={16} className="text-black fill-black ml-0.5" />
+                    </div>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white font-semibold text-[14px] truncate">Liked Songs</p>
+                  <p className="text-white/90 text-[12px] mt-0.5 truncate">{likedSongsCount.toLocaleString()} songs</p>
+                </div>
+              </button>
+            )}
+            {/* All My Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_my"); setPage("workspace"); }}
+              onMouseEnter={() => setHoveredPlaylist("all_my")} onMouseLeave={() => setHoveredPlaylist(null)}
+              className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
+              <div className="relative w-full aspect-square rounded-md overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                <ListMusic size={48} className="text-white" />
+                <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === "all_my" ? "opacity-100" : "opacity-0"}`}>
+                  <div className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200">
+                    <Play size={16} className="text-black fill-black ml-0.5" />
+                  </div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-semibold text-[14px] truncate">All My Songs</p>
+                <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">Compiled Playlist</p>
+              </div>
+            </button>
+            {/* All Followed Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
+              onMouseEnter={() => setHoveredPlaylist("all_followed")} onMouseLeave={() => setHoveredPlaylist(null)}
+              className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
+              <div className="relative w-full aspect-square rounded-md overflow-hidden bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                <RadioTower size={48} className="text-white" />
+                <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === "all_followed" ? "opacity-100" : "opacity-0"}`}>
+                  <div className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200">
+                    <Play size={16} className="text-black fill-black ml-0.5" />
+                  </div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-semibold text-[14px] truncate">All Followed</p>
+                <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">Compiled Playlist</p>
+              </div>
+            </button>
+            {/* All Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_songs"); setPage("workspace"); }}
+              onMouseEnter={() => setHoveredPlaylist("all_songs")} onMouseLeave={() => setHoveredPlaylist(null)}
+              className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
+              <div className="relative w-full aspect-square rounded-md overflow-hidden bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
+                <Music2 size={48} className="text-white" />
+                <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === "all_songs" ? "opacity-100" : "opacity-0"}`}>
+                  <div className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200">
+                    <Play size={16} className="text-black fill-black ml-0.5" />
+                  </div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-semibold text-[14px] truncate">All Songs</p>
+                <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">Compiled Playlist</p>
+              </div>
+            </button>
+
+            {filteredPlaylists.map((pl) => (
+              <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
+                onMouseEnter={() => setHoveredPlaylist(pl.id)} onMouseLeave={() => setHoveredPlaylist(null)}
+                className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
+                <div className="relative w-full aspect-square rounded-md overflow-hidden bg-[#282828]">
+                  {pl.cover.startsWith("http") ? (
+                    <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                  ) : (
+                    <div className={`w-full h-full ${pl.cover}`} />
+                  )}
+                  <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === pl.id ? "opacity-100" : "opacity-0"}`}>
+                    <div className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200">
+                      <Play size={16} className="text-black fill-black ml-0.5" />
+                    </div>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white font-semibold text-[14px] truncate">{pl.name}</p>
+                  <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">{pl.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page 2: Data Table Workspace ─────────────────────────────────────────────
+
+const LAZY_ROW_STEP = 100; // rows rendered per batch
+
+type SortKey = keyof Track | null;
+type GroupBy = GroupByOption;
+type SortDir = "asc" | "desc";
+
+const sameTrackOrder = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((trackId, index) => trackId === right[index]);
+
+const getTrackOrderKey = (track: Track) => track.rowKey ?? String(track.id);
+
+const applyTrackOrder = (tracks: Track[], trackOrder: string[]) => {
+  const trackMap = new Map(tracks.map(track => [getTrackOrderKey(track), track] as const));
+  const ordered = trackOrder.map(id => trackMap.get(id)).filter(Boolean) as Track[];
+  const orderedIds = new Set(trackOrder);
+
+  for (const track of tracks) {
+    if (!orderedIds.has(getTrackOrderKey(track))) {
+      ordered.push(track);
+    }
+  }
+
+  return ordered;
+};
+
+type WorkspaceTrackCache = Record<string, Track[]>;
+
+const WORKSPACE_TRACK_CACHE_KEY = "spotify-manager-workspace-track-cache";
+
+const readWorkspaceTrackCache = (): WorkspaceTrackCache => {
+  try {
+    const stored = sessionStorage.getItem(WORKSPACE_TRACK_CACHE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeWorkspaceTrackCache = (cache: WorkspaceTrackCache) => {
+  try {
+    sessionStorage.setItem(WORKSPACE_TRACK_CACHE_KEY, JSON.stringify(cache));
+  } catch (error) {
+    console.warn("Failed to save workspace track cache:", error);
+  }
+};
+
+function Workspace({
+  playlists,
+  selectedPlaylistId,
+  setSelectedPlaylistId,
+  playlistTracks,
+  loadingTracks,
+  loadingTracksProgress,
+  setPlaylistTracks,
+  likedSongsCount,
+  setLikedSongsCount,
+}: {
+  playlists: Playlist[];
+  selectedPlaylistId: string | number;
+  setSelectedPlaylistId: (id: string | number) => void;
+  playlistTracks: Track[];
+  loadingTracks: boolean;
+  loadingTracksProgress: number;
+  setPlaylistTracks: React.Dispatch<React.SetStateAction<Track[]>>;
+  likedSongsCount: number;
+  setLikedSongsCount: React.Dispatch<React.SetStateAction<number>>;
+}) {
+  const preferences = loadPreferences();
+
+  const [search, setSearch] = useState(preferences.workspaceSearch);
+  const [groupBy, setGroupBy] = useState<GroupBy>(preferences.workspaceGroupBy);
+  const [sortKey, setSortKey] = useState<SortKey>(preferences.workspaceSortKey as SortKey);
+  const [sortDir, setSortDir] = useState<SortDir>(preferences.workspaceSortDir);
+  const [selected, setSelected] = useState<Set<string | number>>(new Set());
+  const [groupByOpen, setGroupByOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [playlistFlyoutOpen, setPlaylistFlyoutOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [trackOrders, setTrackOrders] = useState<Record<string, string[]>>(preferences.workspaceTrackOrders);
+  // Lazy rendering: number of rows currently rendered
+  const [visibleRowCount, setVisibleRowCount] = useState(LAZY_ROW_STEP);
+  const lazyTriggerRef = useRef<HTMLTableRowElement>(null);
+  const trackDragItemRef = useRef<string | null>(null);
+  const trackDragOverRef = useRef<string | null>(null);
+
+  type ColId = "title" | "artist" | "album" | "genre" | "releaseYear" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+  const [columnOrder, setColumnOrder] = useState<ColId[]>(preferences.workspaceColumnOrder as ColId[]);
+  const [visibleCols, setVisibleCols] = useState<Set<ColId>>(new Set(preferences.workspaceVisibleColumns as ColId[]));
+  const dragColRef = useRef<ColId | null>(null);
+  const dragOverColRef = useRef<ColId | null>(null);
+
+  const activePlaylist = playlists.find(p => p.id === selectedPlaylistId);
+  const currentPlaylistKey = String(selectedPlaylistId);
+  const playlistName = 
+    selectedPlaylistId === "liked" ? "Liked Songs" :
+    selectedPlaylistId === "all_my" ? "All My Songs" :
+    selectedPlaylistId === "all_followed" ? "All Followed Songs" :
+    selectedPlaylistId === "all_songs" ? "All Songs" :
+    activePlaylist?.name || "Playlist View";
+  const playlistDesc = 
+    selectedPlaylistId === "liked" ? "Your personal favorite tracks synced from Spotify" :
+    selectedPlaylistId === "all_my" ? "Compiled list of all your liked songs and personal playlists" :
+    selectedPlaylistId === "all_followed" ? "Compiled list of all tracks from playlists you follow" :
+    selectedPlaylistId === "all_songs" ? "Every track in your library compiled into one virtual playlist" :
+    activePlaylist?.desc || "Compiled track analysis and filtering criteria";
+  const playlistCover = 
+    selectedPlaylistId === "liked" ? "" : 
+    selectedPlaylistId === "all_my" ? "bg-gradient-to-br from-blue-600 to-indigo-700" :
+    selectedPlaylistId === "all_followed" ? "bg-gradient-to-br from-purple-600 to-violet-700" :
+    selectedPlaylistId === "all_songs" ? "bg-gradient-to-br from-emerald-600 to-teal-700" :
+    activePlaylist?.cover || "";
+  const isYours = (selectedPlaylistId === "liked" || activePlaylist?.owner === "yours") && selectedPlaylistId !== "all_my" && selectedPlaylistId !== "all_followed" && selectedPlaylistId !== "all_songs";
+  const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
+  const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
+  const currentTrackOrder = trackOrders[currentPlaylistKey] ?? [];
+  const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
+  const hasUnsavedTrackOrder = canSortPlaylist && playlistTracks.length > 0 && currentTrackOrder.length > 0 && !sameTrackOrder(currentTrackOrder, initialTrackOrder);
+  const orderedPlaylistTracks = canReorderTracks && currentTrackOrder.length > 0
+    ? applyTrackOrder(playlistTracks, currentTrackOrder)
+    : playlistTracks;
+
+  // Reset visible row count whenever playlist or sort changes
+  useEffect(() => {
+    setVisibleRowCount(LAZY_ROW_STEP);
+  }, [selectedPlaylistId, sortKey, sortDir, groupBy, search]);
+
+  // IntersectionObserver to load more rows when sentinel is visible
+  useEffect(() => {
+    const sentinel = lazyTriggerRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleRowCount(prev => prev + LAZY_ROW_STEP);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [lazyTriggerRef.current]);
+
+  // Save workspace preferences when they change
+  useEffect(() => {
+    PreferenceUpdaters.setWorkspaceSort(sortKey, sortDir);
+  }, [sortKey, sortDir]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setWorkspaceGroupBy(groupBy);
+  }, [groupBy]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setWorkspaceColumns(columnOrder, Array.from(visibleCols));
+  }, [columnOrder, visibleCols]);
+
+  useEffect(() => {
+    savePreferences({ workspaceTrackOrders: trackOrders });
+  }, [trackOrders]);
+
+  useEffect(() => {
+    if (!columnsOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-cols-dropdown]")) setColumnsOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [columnsOpen]);
+
+  const toggleColVisibility = (id: ColId) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      if (next.has(id) && next.size === 1) return prev;
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleColDragStart = (id: ColId) => { dragColRef.current = id; };
+  const handleColDragEnter = (id: ColId) => { dragOverColRef.current = id; };
+  const handleColDragEnd = () => {
+    const from = dragColRef.current;
+    const to = dragOverColRef.current;
+    if (!from || !to || from === to) return;
+    setColumnOrder(prev => {
+      const next = [...prev];
+      const fi = next.indexOf(from);
+      const ti = next.indexOf(to);
+      next.splice(fi, 1);
+      next.splice(ti, 0, from);
+      return next;
+    });
+    dragColRef.current = null;
+    dragOverColRef.current = null;
+  };
+
+  const filtered = orderedPlaylistTracks.filter((t) => {
+    if (!t) return false;
+    const q = search.toLowerCase();
+    const title = (t.title || "").toLowerCase();
+    const artist = (t.artist || "").toLowerCase();
+    const album = (t.album || "").toLowerCase();
+    const genre = (t.genre || "").toLowerCase();
+    return title.includes(q) || artist.includes(q) || album.includes(q) || genre.includes(q);
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (!sortKey) return 0;
+    const va = a[sortKey as keyof Track];
+    const vb = b[sortKey as keyof Track];
+
+    if (va === undefined || va === null) return 1;
+    if (vb === undefined || vb === null) return -1;
+
+    let cmp = 0;
+    if (sortKey === "duration") {
+      cmp = a.durationMs - b.durationMs;
+    } else if (typeof va === "number" && typeof vb === "number") {
+      cmp = va - vb;
+    } else {
+      cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const handleSavePlaylistOrder = async () => {
+    if (!canSortPlaylist || !hasUnsavedTrackOrder || currentTrackOrder.length === 0) return;
+
+    try {
+      const snapshotId = await getPlaylistSnapshotId(selectedPlaylistId);
+      await reorderPlaylistTracks(selectedPlaylistId, currentTrackOrder, snapshotId);
+      setPlaylistTracks(prev => applyTrackOrder(prev, currentTrackOrder));
+      toast.success("Playlist sequence saved to Spotify.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save playlist sequence.");
+    }
+  };
+
+  const toggleRow = (id: string | number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === sorted.length) setSelected(new Set());
+    else setSelected(new Set(sorted.map(t => t.id)));
+  };
+
+  const toggleGroup = (label: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  };
+
+  const groupedEntries: { label: string; tracks: Track[] }[] = (() => {
+    if (groupBy === "none") return [{ label: "", tracks: sorted }];
+    const map = new Map<string, Track[]>();
+    for (const t of sorted) {
+      const key = groupBy === "artist" ? t.artist : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(t);
+    }
+    return Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
+  })();
+
+  const handleAddToPlaylist = async (destPlaylistId: string | number) => {
+    const selectedIds = Array.from(selected);
+    const uris = selectedIds.map(id => `spotify:track:${id}`);
+    try {
+      await addTracksToPlaylist(destPlaylistId, uris);
+      toast.success(`Successfully added ${selectedIds.length} track(s) to playlist.`);
+      setPlaylistFlyoutOpen(false);
+      setSelected(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to add tracks. Make sure you own the destination playlist.");
+    }
+  };
+
+  const handleDelete = async () => {
+    const selectedIds = Array.from(selected);
+    const uris = selectedIds.map(id => `spotify:track:${id}`);
+    try {
+      await removeTracksFromPlaylist(selectedPlaylistId, uris);
+      setPlaylistTracks(prev => prev.filter(t => !selected.has(t.id)));
+      setTrackOrders(prev => {
+        const nextOrder = prev[currentPlaylistKey] ?? [];
+        return {
+          ...prev,
+          [currentPlaylistKey]: nextOrder.filter(trackId => !selected.has(trackId)),
+        };
+      });
+      if (selectedPlaylistId === "liked") {
+        setLikedSongsCount(c => Math.max(0, c - selectedIds.length));
+      }
+      toast.success(`Successfully removed ${selectedIds.length} track(s) from this playlist.`);
+      setSelected(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to remove tracks. You can only remove tracks from playlists you own.");
+    }
+  };
+
+  const handleTrackDragStart = (trackId: string | number) => {
+    if (!canReorderTracks) return;
+    trackDragItemRef.current = String(trackId);
+  };
+
+  const handleTrackDragEnter = (trackId: string | number) => {
+    if (!canReorderTracks) return;
+    trackDragOverRef.current = String(trackId);
+  };
+
+  const handleTrackDragEnd = () => {
+    const draggedId = trackDragItemRef.current;
+    const targetId = trackDragOverRef.current;
+
+    if (!draggedId || !targetId || draggedId === targetId) {
+      trackDragItemRef.current = null;
+      trackDragOverRef.current = null;
+      return;
+    }
+
+    const nextOrder = orderedPlaylistTracks.map(getTrackOrderKey);
+    const draggedIndex = nextOrder.indexOf(draggedId);
+    const targetIndex = nextOrder.indexOf(targetId);
+
+    if (draggedIndex !== -1 && targetIndex !== -1) {
+      nextOrder.splice(draggedIndex, 1);
+      nextOrder.splice(targetIndex, 0, draggedId);
+      setTrackOrders(prev => ({
+        ...prev,
+        [currentPlaylistKey]: nextOrder,
+      }));
+    }
+
+    trackDragItemRef.current = null;
+    trackDragOverRef.current = null;
+  };
+
+  const ColHeader = ({ col, label }: { col: ColId; label: string }) => (
+    <th
+      draggable
+      onDragStart={() => handleColDragStart(col)}
+      onDragEnter={() => handleColDragEnter(col)}
+      onDragEnd={handleColDragEnd}
+      onDragOver={e => e.preventDefault()}
+      className={`group px-3 py-3 text-left text-[10px] uppercase tracking-widest font-semibold cursor-grab active:cursor-grabbing transition-colors select-none ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}>
+      <button
+        type="button"
+        onClick={() => toggleSort(col as SortKey)}
+        className="flex items-center gap-1 text-left"
+      >
+        {col === "energy" ? "ENERGY (API)" : col === "bpm" ? "BPM (API)" : label}
+        {sortKey === col
+          ? sortDir === "asc" ? <ChevronDown size={11} className="text-[#1DB954] rotate-180" /> : <ChevronDown size={11} className="text-[#1DB954]" />
+          : <ChevronDown size={11} className="opacity-0 group-hover:opacity-40 transition-opacity" />}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 bg-[#121212] overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Header */}
+      <div className="bg-gradient-to-b from-[#2a1a4e] to-[#121212] px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 shrink-0">
+        <div className="flex items-end gap-4 md:gap-6">
+          <div className="w-[80px] h-[80px] md:w-[100px] md:h-[100px] rounded-lg flex items-center justify-center shadow-2xl shrink-0 overflow-hidden bg-[#282828]">
+            {selectedPlaylistId === "liked" ? (
+              <div className="w-full h-full bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
+                <Heart size={36} className="text-white fill-white" />
+              </div>
+            ) : selectedPlaylistId === "all_my" ? (
+              <div className="w-full h-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                <ListMusic size={36} className="text-white" />
+              </div>
+            ) : selectedPlaylistId === "all_followed" ? (
+              <div className="w-full h-full bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                <RadioTower size={36} className="text-white" />
+              </div>
+            ) : selectedPlaylistId === "all_songs" ? (
+              <div className="w-full h-full bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
+                <Music2 size={36} className="text-white" />
+              </div>
+            ) : playlistCover.startsWith("http") ? (
+              <img src={playlistCover} className="w-full h-full object-cover" alt="" />
+            ) : (
+              <div className={`w-full h-full ${playlistCover} flex items-center justify-center`}>
+                <Zap size={36} className="text-white/80" />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3] mb-1">Playlist</p>
+            <h1 className="text-white text-[20px] md:text-[32px] font-extrabold leading-none mb-2 md:mb-3 truncate">{playlistName}</h1>
+            <p className="text-[#B3B3B3] text-[12px] md:text-[13px] mb-2 md:mb-3 hidden sm:block">{playlistDesc}</p>
+            <div className="flex items-center gap-2 md:gap-4 text-[11px] md:text-[13px] flex-wrap">
+              <span className="text-white font-semibold">{playlistTracks.length} tracks</span>
+              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
+              <div className="flex items-center gap-1.5">
+                <RefreshCw size={12} className="text-[#1DB954]" />
+                <span className="text-[#1DB954] font-semibold">Synced Live</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 md:gap-3 shrink-0">
+            <button
+              onClick={handleSavePlaylistOrder}
+              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || currentTrackOrder.length === 0}
+              title={!canSortPlaylist
+                ? "Only playlists you own can be saved back to Spotify"
+                : !hasUnsavedTrackOrder
+                  ? "Playlist sequence is already in sync"
+                  : "Save the current track order to Spotify"}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer border ${hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
+            >
+              <RefreshCw size={13} className={hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
+              Sort Playlist
+            </button>
+            <button
+              onClick={() => {
+                if (playlistTracks.length > 0) {
+                  playTrack({ uris: playlistTracks.map(t => `spotify:track:${t.id}`) })
+                    .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
+                }
+              }}
+              className="w-10 h-10 md:w-12 md:h-12 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer"
+            >
+              <Play size={20} className="text-black fill-black ml-0.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-3 border-b border-[#282828] bg-[#121212] shrink-0 overflow-visible">
+        <div className="flex-1 min-w-0 max-w-sm relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
+          <input type="text" placeholder="Search tracks..." value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-[#282828] rounded text-[12px] md:text-[13px] text-white placeholder-[#B3B3B3] border border-transparent focus:border-white/20 outline-none transition-colors" />
+        </div>
+
+        <div className="relative hidden sm:block">
+          <button onClick={() => setGroupByOpen(o => !o)}
+            className="flex items-center gap-2 px-3 py-2 bg-[#282828] rounded text-[13px] text-[#B3B3B3] hover:text-white transition-colors border border-transparent hover:border-white/20 cursor-pointer">
+            <ListMusic size={14} />
+            Group By: <span className="text-white">{GROUP_BY_LABELS[groupBy as GroupByOption]}</span>
+            <ChevronDown size={12} />
+          </button>
+          {groupByOpen && (
+            <div className="absolute top-full left-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
+              {(Object.entries(GROUP_BY_LABELS) as [GroupBy, string][]).map(([opt, label]) => (
+                <button key={opt} onClick={() => { setGroupBy(opt); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                  className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === opt ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+                  {label}
+                  {groupBy === opt && <Check size={12} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <div className="relative" data-cols-dropdown>
+            <button
+              onClick={() => setColumnsOpen(o => !o)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${columnsOpen ? "bg-white text-black" : "bg-[#282828] text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+              <Columns3 size={13} />
+              Columns
+              <ChevronDown size={11} className={`transition-transform duration-200 ${columnsOpen ? "rotate-180" : ""}`} />
+            </button>
+            {columnsOpen && (
+              <div className="absolute top-full left-0 mt-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 overflow-hidden flex flex-col">
+                <div className="px-4 py-2 border-b border-[#383838] shrink-0">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Toggle Columns</p>
+                </div>
+                <div className="max-h-60 overflow-y-auto py-1">
+                  {ALL_COLUMNS.map(col => (
+                    <button key={col.id} onClick={() => toggleColVisibility(col.id)}
+                      className="w-full flex items-center justify-between px-4 py-2 text-[13px] hover:bg-[#383838] transition-colors cursor-pointer text-left">
+                      <span className={visibleCols.has(col.id) ? "text-white" : "text-[#535353]"}>{col.label}</span>
+                      {visibleCols.has(col.id) && <Check size={12} className="text-[#1DB954]" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            disabled={selected.size === 0 || !isYours}
+            onClick={handleDelete}
+            title={!isYours ? "You can only delete tracks from playlists you own" : "Remove selected tracks"}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${selected.size > 0 && isYours ? "bg-[#e91429]/10 text-[#e91429] hover:bg-[#e91429]/20 border border-[#e91429]/30" : "bg-[#282828] text-[#535353] cursor-not-allowed border border-transparent"}`}
+          >
+            <Trash2 size={13} />
+            Remove{selected.size > 0 && ` (${selected.size})`}
+          </button>
+
+          <div className="relative">
+            <button
+              disabled={selected.size === 0}
+              onClick={() => setPlaylistFlyoutOpen(o => !o)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${selected.size > 0 ? playlistFlyoutOpen ? "bg-white text-black" : "bg-[#282828] text-white hover:bg-[#383838]" : "bg-[#282828] text-[#535353] cursor-not-allowed"}`}>
+              <Plus size={13} />
+              Add to Playlist
+              <ChevronDown size={11} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
+            </button>
+            {playlistFlyoutOpen && selected.size > 0 && (
+              <div className="absolute top-full right-0 mt-1 w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-[#383838]">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
+                </div>
+                <div className="max-h-52 overflow-y-auto py-1">
+                  {playlists.filter(pl => pl.owner === "yours").length === 0 ? (
+                    <div className="px-4 py-3 text-xs text-[#888888]">No playlists owned by you.</div>
+                  ) : (
+                    playlists.filter(pl => pl.owner === "yours").map(pl => (
+                      <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id)}
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer">
+                        <div className="w-8 h-8 rounded shrink-0 bg-[#383838] overflow-hidden">
+                          {pl.cover.startsWith("http") ? (
+                            <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                          ) : (
+                            <div className={`w-full h-full ${pl.cover}`} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-white text-[13px] font-medium truncate">{pl.name}</p>
+                          <p className="text-[#B3B3B3] text-[11px]">{pl.tracks} tracks</p>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        {loadingTracks ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center px-6 bg-[#121212]/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center text-center w-full max-w-sm">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-t-transparent border-[#1DB954] mb-3" />
+              <p className="text-[#B3B3B3] text-sm font-semibold">Fetching tracks & metadata from Spotify...</p>
+              <p className="text-[#535353] text-xs mt-1">Analyzing audio features (BPM, Energy) and artist genres</p>
+              <div className="mt-4 w-full rounded-full bg-[#1a1a1a] border border-[#282828] p-1">
+                <div className="h-2 rounded-full bg-gradient-to-r from-[#1DB954] via-[#29d97f] to-[#7CFFB2] transition-all duration-300 ease-out" style={{ width: `${Math.max(4, loadingTracksProgress)}%` }} />
+              </div>
+              <p className="mt-2 text-[11px] font-mono text-[#B3B3B3]">{Math.round(loadingTracksProgress)}%</p>
+            </div>
+          </div>
+        ) : null}
+        <div className={`h-full overflow-auto ${loadingTracks ? "opacity-0 pointer-events-none" : ""}`}>
+        <table className="w-full min-w-[860px] border-collapse">
+          <thead className="sticky top-0 z-10 bg-[#121212]">
+            <tr className="border-b border-[#282828]">
+              <th className="w-10 px-4 py-3 text-left">
+                <button onClick={toggleAll}
+                  className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${selected.size === sorted.length && sorted.length > 0 ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"}`}>
+                  {selected.size === sorted.length && sorted.length > 0 && <Check size={10} className="text-black" />}
+                </button>
+              </th>
+              <th className="w-8 px-2 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">#</th>
+              {columnOrder.filter(id => visibleCols.has(id)).map(id => {
+                const col = ALL_COLUMNS.find(c => c.id === id)!;
+                return <ColHeader key={id} col={id} label={col.label} />;
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={12} className="text-center py-20 text-[#535353] text-sm">
+                  No tracks found in this playlist.
+                </td>
+              </tr>
+            ) : (() => {
+              // Lazy rendering: accumulate rows until we hit visibleRowCount
+              let renderedCount = 0;
+              const rows = groupedEntries.map(({ label, tracks }, gi) => {
+                const isCollapsed = collapsedGroups.has(label);
+                return (
+                  <React.Fragment key={`group-${gi}-${label}`}>
+                    {groupBy !== "none" && (
+                      <tr className="bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e]" onClick={() => toggleGroup(label)}>
+                        <td colSpan={12} className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            {isCollapsed
+                              ? <ChevronRight size={14} className="text-[#B3B3B3]" />
+                              : <ChevronDown size={14} className="text-[#B3B3B3]" />}
+                            <span className="text-[#B3B3B3] text-[12px] font-semibold">
+                              {GROUP_BY_LABELS[groupBy as GroupByOption]}: <span className="text-white">{label}</span>
+                              <span className="ml-2 text-[#535353]">({tracks.length} tracks)</span>
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {!isCollapsed && (() => {
+                      const limit = Math.max(0, visibleRowCount - renderedCount);
+                      const visibleTracks = tracks.slice(0, limit);
+                      renderedCount += visibleTracks.length;
+                      return visibleTracks.map((track, i) => {
+                        const isSelected = selected.has(track.id);
+                        const trackKey = getTrackOrderKey(track);
+                        const trackImage = track.cover;
+                        return (
+                          <tr
+                            key={trackKey}
+                            draggable={canReorderTracks}
+                            onDragStart={() => handleTrackDragStart(trackKey)}
+                            onDragEnter={() => handleTrackDragEnter(trackKey)}
+                            onDragEnd={handleTrackDragEnd}
+                            onDragOver={(e) => e.preventDefault()}
+                            className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${
+                              isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
+                            }`}
+                            onClick={() => toggleRow(track.id)}
+                          >
+                            <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => toggleRow(track.id)}
+                                className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${
+                                  isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
+                                }`}
+                              >
+                                {isSelected && <Check size={10} className="text-black" />}
+                              </button>
+                            </td>
+                            <td className="px-2 py-2.5">
+                              {canReorderTracks && <GripVertical size={12} className="text-[#535353] hidden group-hover:inline-block mr-1 align-middle" />}
+                              <span className="text-[#B3B3B3] text-[12px] font-mono group-hover:hidden">{i + 1}</span>
+                              <Play
+                                size={12}
+                                className="text-white fill-white hidden group-hover:block cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  playTrack({ uris: [`spotify:track:${track.id}`] }).catch(() =>
+                                    toast.error("Could not play track. Is Spotify open on an active device?")
+                                  );
+                                }}
+                              />
+                            </td>
+                            {columnOrder
+                              .filter((colId) => visibleCols.has(colId))
+                              .map((colId) => {
+                                if (colId === "title") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
+                                          {trackImage ? (
+                                            <ImageWithFallback src={trackImage} alt="" className="w-full h-full object-cover" />
+                                          ) : (
+                                            <Music2 size={14} className="text-[#B3B3B3]" />
+                                          )}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <p className="text-white text-[13px] font-semibold truncate max-w-[180px]">
+                                            {track.title}
+                                          </p>
+                                          <p className="text-[#B3B3B3] text-[11px] truncate max-w-[180px]">
+                                            {track.artist}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "artist") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[13px] truncate max-w-[140px]">
+                                      {track.artist}
+                                    </td>
+                                  );
+                                }
+                                if (colId === "album") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[13px] truncate max-w-[140px]">
+                                      <AlbumCell album={track.album} />
+                                    </td>
+                                  );
+                                }
+                                if (colId === "genre") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                        {track.genre}
+                                      </span>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "releaseYear") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                      {track.releaseYear}
+                                    </td>
+                                  );
+                                }
+                                if (colId === "dateAdded") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                      {track.dateAdded}
+                                    </td>
+                                  );
+                                }
+                                if (colId === "bpm") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                      {track.bpm}
+                                    </td>
+                                  );
+                                }
+                                if (colId === "popularity") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-[#1DB954] h-full" style={{ width: `${Math.min(100, Math.max(0, track.popularity))}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[12px] font-mono w-8 text-right">
+                                          {Math.round(track.popularity)}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                 if (colId === "energy") {
+                                  const energyPct = Math.round(track.energy * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-[#1DB954] h-full" style={{ width: `${energyPct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{energyPct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "danceability") {
+                                  const val = track.danceability !== undefined ? track.danceability : 0.5;
+                                  const pct = Math.round(val * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-purple-500 h-full" style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "valence") {
+                                  const val = track.valence !== undefined ? track.valence : 0.5;
+                                  const pct = Math.round(val * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-amber-500 h-full" style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "acousticness") {
+                                  const val = track.acousticness !== undefined ? track.acousticness : 0.2;
+                                  const pct = Math.round(val * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-cyan-500 h-full" style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "instrumentalness") {
+                                  const val = track.instrumentalness !== undefined ? track.instrumentalness : 0.1;
+                                  const pct = Math.round(val * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-pink-500 h-full" style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "speechiness") {
+                                  const val = track.speechiness !== undefined ? track.speechiness : 0.05;
+                                  const pct = Math.round(val * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-indigo-500 h-full" style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "liveness") {
+                                  const val = track.liveness !== undefined ? track.liveness : 0.1;
+                                  const pct = Math.round(val * 100);
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                          <div className="bg-emerald-500 h-full" style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                if (colId === "loudness") {
+                                  const val = track.loudness !== undefined ? track.loudness : -6.0;
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                      {val.toFixed(1)} dB
+                                    </td>
+                                  );
+                                }
+                                if (colId === "duration") {
+                                  return (
+                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                      {track.duration}
+                                    </td>
+                                  );
+                                }
+                                return null;
+                              })}
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </React.Fragment>
+                );
+              });
+              // Count total rendered rows to detect if sentinel is needed
+              let totalVisible = 0;
+              for (const { label, tracks } of groupedEntries) {
+                if (!collapsedGroups.has(label)) totalVisible += tracks.length;
+              }
+              return (
+                <>
+                  {rows}
+                  {visibleRowCount < totalVisible && (
+                    <tr ref={lazyTriggerRef}>
+                      <td colSpan={12} className="py-4 text-center">
+                        <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent border-[#1DB954]" />
+                      </td>
+                    </tr>
+                  )}
+                </>
+              );
+            })()}
+          </tbody>
+        </table>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+// ─── Page 3: API Reference ─────────────────────────────────────────────────────
+
+function EndpointPlayground({ endpoint }: { endpoint: ApiEndpoint }) {
+  // Parse path parameters
+  const pathParams: string[] = [];
+  const pathRegex = /\{([^}]+)\}|\{\{([^}]+)\}\}/g;
+  let match;
+  while ((match = pathRegex.exec(endpoint.path)) !== null) {
+    pathParams.push(match[1] || match[2]);
+  }
+
+  // Parse query parameters
+  const queryParams = endpoint.params ? endpoint.params.split(", ") : [];
+
+  // State for parameters
+  const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
+    const defaults: Record<string, string> = {};
+    pathParams.forEach(p => {
+      // Set sensible defaults for path variables
+      if (p.includes("id")) {
+        if (p.includes("album")) defaults[p] = "4aawyAB9vmqN3u77FjrbEE"; // Daft Punk - RAM
+        else if (p.includes("artist")) defaults[p] = "4tZwfgrHOu2mvq6V4NWiYj"; // Daft Punk
+        else if (p.includes("track")) defaults[p] = "2TpxZ7JUBn3uw46aR7qd6V"; // Daft Punk - Get Lucky
+        else if (p.includes("playlist")) defaults[p] = "37i9dQZF1DXcBWIGo373Ol"; // Lo-fi Beats
+        else defaults[p] = "4aawyAB9vmqN3u77FjrbEE";
+      } else {
+        defaults[p] = "";
+      }
+    });
+    queryParams.forEach((q: string) => {
+      if (q === "limit") defaults[q] = "10";
+      else if (q === "market") defaults[q] = "US";
+      else if (q === "type") defaults[q] = "track";
+      else defaults[q] = "";
+    });
+    return defaults;
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [response, setResponse] = useState<any>(null);
+  const [status, setStatus] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRun = async () => {
+    setLoading(true);
+    setResponse(null);
+    setStatus(null);
+    setError(null);
+
+    try {
+      // 1. Build path
+      let resolvedPath = endpoint.path;
+      pathParams.forEach(p => {
+        const val = paramValues[p] || "";
+        resolvedPath = resolvedPath.replace(`{${p}}`, val).replace(`{{${p}}}`, val);
+      });
+
+      // 2. Build query parameters
+      const qParams = new URLSearchParams();
+      queryParams.forEach((q: string) => {
+        const val = paramValues[q];
+        if (val) qParams.append(q, val);
+      });
+      const queryStr = qParams.toString();
+      const finalPath = queryStr ? `${resolvedPath}?${queryStr}` : resolvedPath;
+
+      // 3. Perform live API request using spotifyFetch
+      const opts: RequestInit = { method: endpoint.method };
+      if (endpoint.method !== "GET" && endpoint.body) {
+        opts.body = endpoint.body;
+      }
+
+      const res = await spotifyFetch(finalPath, opts);
+      setStatus(200);
+      setResponse(res || { success: true, message: "Request completed with no content." });
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "An error occurred");
+      setStatus(err.message?.match(/\((\d+)\)/)?.[1] ? Number(err.message.match(/\((\d+)\)/)[1]) : 400);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-[#282828] space-y-4">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1DB954]">Interactive API Playground</h4>
+        <button
+          onClick={handleRun}
+          disabled={loading}
+          className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${loading ? "bg-[#282828] text-[#535353] cursor-not-allowed" : "bg-[#1DB954] text-black hover:bg-[#1ed760] hover:scale-105"}`}
+        >
+          {loading ? "Sending..." : "Send Live Request"}
+        </button>
+      </div>
+
+      {/* Input Fields */}
+      {(pathParams.length > 0 || queryParams.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[#1e1e1e] p-3 rounded-lg border border-white/5">
+          {pathParams.map(p => (
+            <div key={p} className="flex flex-col gap-1">
+              <label className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Path parameter: {"{" + p + "}"}</label>
+              <input
+                type="text"
+                value={paramValues[p] || ""}
+                onChange={e => setParamValues(prev => ({ ...prev, [p]: e.target.value }))}
+                className="bg-[#282828] text-white px-2 py-1 rounded text-xs outline-none border border-transparent focus:border-[#1DB954]/50"
+              />
+            </div>
+          ))}
+          {queryParams.map((q: string) => (
+            <div key={q} className="flex flex-col gap-1">
+              <label className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Query parameter: {q}</label>
+              <input
+                type="text"
+                value={paramValues[q] || ""}
+                onChange={e => setParamValues(prev => ({ ...prev, [q]: e.target.value }))}
+                className="bg-[#282828] text-white px-2 py-1 rounded text-xs outline-none border border-transparent focus:border-[#1DB954]/50"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Output Console */}
+      {(status !== null || error !== null || response !== null) && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#535353]">Response Console</span>
+            {status && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${status >= 200 && status < 300 ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-red-950 text-red-400 border border-red-800"}`}>
+                HTTP {status}
+              </span>
+            )}
+          </div>
+          {error && (
+            <div className="p-3 bg-red-950/20 border border-red-900/30 text-red-400 text-xs rounded font-mono">
+              Error: {error}
+            </div>
+          )}
+          {response && (
+            <pre className="text-[11px] font-mono text-emerald-400 bg-black/40 border border-[#1DB954]/10 rounded p-4 overflow-auto max-h-[260px] scrollbar-thin scrollbar-thumb-[#282828]">
+              {JSON.stringify(response, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApiReference() {
+  const preferences = loadPreferences();
+  const [openSection, setOpenSection] = useState<string>(preferences.apiOpenSection);
+  const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(preferences.apiExpandedEndpoint);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [showDeprecated, setShowDeprecated] = useState(false);
+
+  // Save preferences when they change
+  useEffect(() => {
+    PreferenceUpdaters.setApiSection(openSection);
+  }, [openSection]);
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Header */}
+      <div className="bg-gradient-to-b from-[#0d2a1a] to-[#121212] px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 border-b border-[#282828]">
+        <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
+          <div className="w-10 h-10 md:w-12 md:h-12 bg-[#1DB954]/20 rounded-lg flex items-center justify-center border border-[#1DB954]/30">
+            <Code2 size={20} className="md:hidden text-[#1DB954]" />
+            <Code2 size={24} className="hidden md:block text-[#1DB954]" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Postman Collection</p>
+            <h1 className="text-white text-[20px] md:text-[26px] font-extrabold leading-tight">Spotify API Reference</h1>
+          </div>
+          <div className="flex items-center gap-2 bg-[#282828] px-3 py-1.5 rounded-lg border border-[#383838]">
+            <span className="text-[11px] text-[#B3B3B3] font-semibold uppercase tracking-wider">Deprecated</span>
+            <button
+              onClick={() => setShowDeprecated(!showDeprecated)}
+              className={`w-8 h-4 rounded-full transition-colors relative cursor-pointer ${showDeprecated ? "bg-[#1DB954]" : "bg-[#535353]"}`}
+            >
+              <div className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-all ${showDeprecated ? "left-4.5" : "left-0.5"}`} />
+            </button>
+          </div>
+          <button
+            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            className="md:hidden w-9 h-9 flex items-center justify-center rounded-md bg-[#282828] text-white">
+            <ListMusic size={18} />
+          </button>
+        </div>
+        <p className="text-[#B3B3B3] text-[13px] max-w-2xl">Complete endpoint reference for the Spotify Web API. All requests require <code className="text-[#1DB954] bg-[#1DB954]/10 px-1.5 py-0.5 rounded text-[12px] font-mono">Authorization: Bearer {"{{access_token}}"}</code> in the request header.</p>
+        <div className="flex items-center gap-6 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-[#1DB954]" />
+            <span className="text-[#B3B3B3] text-[12px]">Base URL: <span className="text-white font-mono text-[12px]">https://api.spotify.com/v1</span></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioTower size={13} className="text-[#1DB954]" />
+            <span className="text-[#B3B3B3] text-[12px]">{API_SECTIONS.reduce((acc, s) => acc + (showDeprecated ? s.endpoints.length : s.endpoints.filter(e => !e.deprecated).length), 0)} endpoints documented</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Laptop2 size={13} className="text-[#B3B3B3]" />
+            <span className="text-[#B3B3B3] text-[12px]">OAuth 2.0 · Live Playground</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex relative">
+        {/* Mobile Overlay */}
+        {mobileSidebarOpen && (
+          <div className="md:hidden fixed inset-0 z-40 bg-black/80" onClick={() => setMobileSidebarOpen(false)} />
+        )}
+
+        {/* Left Nav */}
+        <div className={`${mobileSidebarOpen ? "fixed left-0 top-0 bottom-0 z-50" : "hidden"} md:block w-64 md:w-52 shrink-0 border-r border-[#282828] md:sticky md:top-0 h-screen overflow-y-auto py-4 bg-[#121212]`}>
+          <div className="md:hidden flex items-center justify-between px-5 py-3 border-b border-[#282828] mb-2">
+            <span className="text-white font-semibold">Categories</span>
+            <button onClick={() => setMobileSidebarOpen(false)} className="text-[#B3B3B3] hover:text-white">
+              <X size={20} />
+            </button>
+          </div>
+          {API_SECTIONS.map((section) => {
+            const endpoints = showDeprecated ? section.endpoints : section.endpoints.filter(e => !e.deprecated);
+            return (
+              <button key={section.name} onClick={() => { setOpenSection(section.name); setMobileSidebarOpen(false); }}
+                className={`w-full text-left px-5 py-2.5 text-[13px] transition-colors flex items-center justify-between gap-2 ${openSection === section.name ? "text-white bg-[#282828] border-l-2 border-[#1DB954]" : "text-[#B3B3B3] hover:text-white hover:bg-[#1a1a1a]"}`}>
+                <span className="truncate">{section.name}</span>
+                <span className="text-[11px] text-[#535353] font-mono shrink-0">{endpoints.length}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Endpoint List */}
+        <div className="flex-1 py-4 md:py-6 px-4 md:px-8">
+          {API_SECTIONS.filter(s => s.name === openSection).map((section) => {
+            const endpoints = showDeprecated ? section.endpoints : section.endpoints.filter(e => !e.deprecated);
+            return (
+              <div key={section.name}>
+                <h2 className="text-white text-[16px] md:text-[18px] font-bold mb-1">{section.name}</h2>
+                <p className="text-[#B3B3B3] text-[12px] md:text-[13px] mb-4 md:mb-5">{endpoints.length} endpoints</p>
+                <div className="space-y-2">
+                  {endpoints.map((ep, i) => {
+                  const key = `${section.name}-${i}`;
+                  const isExpanded = expandedEndpoint === key;
+                  return (
+                    <div key={i} className="rounded-lg border border-[#282828] bg-[#181818] overflow-hidden">
+                      <button className="w-full flex items-center gap-2 md:gap-4 px-3 md:px-5 py-3 md:py-3.5 hover:bg-[#1e1e1e] transition-colors text-left"
+                        onClick={() => setExpandedEndpoint(isExpanded ? null : key)}>
+                        <MethodBadge method={ep.method} />
+                        <code className="text-white text-[11px] md:text-[13px] font-mono flex-1 truncate">{ep.path}</code>
+                        {ep.deprecated && (
+                          <span className="hidden sm:inline text-[9px] px-1.5 py-0.5 rounded bg-[#e91429]/10 text-[#e91429] border border-[#e91429]/30 font-semibold uppercase tracking-wider">Deprecated</span>
+                        )}
+                        <span className="text-[#B3B3B3] text-[12px] truncate max-w-[320px] hidden lg:block">{ep.desc}</span>
+                        <ChevronDown size={14} className={`text-[#535353] transition-transform shrink-0 ${isExpanded ? "rotate-180" : ""}`} />
+                      </button>
+                      {isExpanded && (
+                        <div className="px-5 pb-4 pt-1 border-t border-[#282828] bg-[#141414]">
+                          {ep.deprecated && (
+                            <div className="mb-3 px-3 py-2 bg-[#e91429]/10 border border-[#e91429]/30 rounded flex items-start gap-2">
+                              <X size={14} className="text-[#e91429] shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-[#e91429] text-[11px] font-bold uppercase tracking-wider">Deprecated Endpoint</p>
+                                <p className="text-[#e91429]/80 text-[12px] mt-1">This endpoint is deprecated and may be removed in a future version. Please use alternative endpoints.</p>
+                              </div>
+                            </div>
+                          )}
+                          <p className="text-[#B3B3B3] text-[13px] mb-3">{ep.desc}</p>
+                          {ep.params && (
+                            <div className="mb-3">
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Query Parameters</p>
+                              <div className="flex flex-wrap gap-2">
+                                {ep.params.split(", ").map(p => (
+                                  <span key={p} className="px-2 py-0.5 bg-[#282828] rounded text-[12px] font-mono text-[#B3B3B3] border border-[#383838]">{p}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {ep.body && (
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Body</p>
+                              <pre className="text-[12px] font-mono text-[#1DB954] bg-[#0d1f0f] border border-[#1DB954]/20 rounded px-4 py-3 overflow-x-auto">{ep.body}</pre>
+                            </div>
+                          )}
+                          <div className="mt-3 flex items-center gap-2">
+                            <span className="text-[11px] text-[#535353]">Scope required:</span>
+                            <span className="text-[11px] font-mono text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded border border-[#383838]">
+                              {ep.method === "GET" ? "user-read-private" : ep.path.includes("player") ? "user-modify-playback-state" : "playlist-modify-private"}
+                            </span>
+                          </div>
+                          <EndpointPlayground endpoint={ep} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Bottom Now Playing Bar ────────────────────────────────────────────────────
+
+function NowPlayingBar({
+  playbackState,
+  setPlaybackState,
+}: {
+  playbackState: any;
+  setPlaybackState: React.Dispatch<React.SetStateAction<any>>;
+}) {
+  const isPlaying = playbackState?.is_playing || false;
+  const shuffle = playbackState?.shuffle_state || false;
+  const repeat = playbackState?.repeat_state || "off";
+  const volume = playbackState?.device?.volume_percent ?? 50;
+  
+  // Track local progress changes during user drag
+  const [localProgressPct, setLocalProgressPct] = useState<number | null>(null);
+
+  const track = playbackState?.item;
+
+  // Sync internal progress timer
+  const progressMs = playbackState?.progress_ms ?? 0;
+  const durationMs = track?.duration_ms ?? 1;
+  const progressPct = localProgressPct !== null ? localProgressPct : Math.round((progressMs / durationMs) * 100);
+
+  const handlePlayPause = async () => {
+    try {
+      if (isPlaying) {
+        await pauseTrack();
+        setPlaybackState((prev: any) => prev ? { ...prev, is_playing: false } : null);
+      } else {
+        await playTrack({});
+        setPlaybackState((prev: any) => prev ? { ...prev, is_playing: true } : null);
+      }
+    } catch (err) {
+      toast.error("Playback control failed. Is Spotify running on an active device?");
+    }
+  };
+
+  const handleNext = async () => {
+    try {
+      await skipToNext();
+      toast.success("Skipped to next track");
+    } catch (err) {
+      toast.error("Failed to skip track");
+    }
+  };
+
+  const handlePrevious = async () => {
+    try {
+      await skipToPrevious();
+      toast.success("Skipped to previous track");
+    } catch (err) {
+      toast.error("Failed to skip track");
+    }
+  };
+
+  const handleShuffle = async () => {
+    try {
+      await toggleShuffle(!shuffle);
+      setPlaybackState((prev: any) => prev ? { ...prev, shuffle_state: !shuffle } : null);
+      toast.success(shuffle ? "Shuffle turned off" : "Shuffle turned on");
+    } catch (err) {
+      toast.error("Failed to toggle shuffle");
+    }
+  };
+
+  const handleRepeat = async () => {
+    try {
+      const nextState = repeat === "off" ? "context" : repeat === "context" ? "track" : "off";
+      await toggleRepeat(nextState);
+      setPlaybackState((prev: any) => prev ? { ...prev, repeat_state: nextState } : null);
+      toast.success(`Repeat mode: ${nextState}`);
+    } catch (err) {
+      toast.error("Failed to change repeat mode");
+    }
+  };
+
+  const handleVolumeChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    setPlaybackState((prev: any) => prev ? { ...prev, device: { ...prev.device, volume_percent: val } } : null);
+    try {
+      await setPlayerVolume(val);
+    } catch (err) {
+      console.warn("Failed to set volume:", err);
+    }
+  };
+
+  const handleProgressChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    setLocalProgressPct(val);
+  };
+
+  const handleProgressSeekEnd = async (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
+    if (localProgressPct === null) return;
+    const targetMs = Math.round((localProgressPct / 100) * durationMs);
+    setLocalProgressPct(null);
+    setPlaybackState((prev: any) => prev ? { ...prev, progress_ms: targetMs } : null);
+    try {
+      await seekPosition(targetMs);
+    } catch (err) {
+      console.warn("Failed to seek:", err);
+    }
+  };
+
+  // If no track is playing, show a styled inactive remote control
+  if (!track) {
+    return (
+      <div className="hidden md:flex h-[90px] shrink-0 bg-[#181818] border-t border-[#282828] items-center justify-between px-6 select-none" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-[#282828] rounded flex items-center justify-center">
+            <Music2 size={18} className="text-white/30 animate-pulse" />
+          </div>
+          <div>
+            <p className="text-white text-xs font-semibold">No playback active</p>
+            <p className="text-[#888888] text-[11px]">Start playing Spotify on any device to enable remote control.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-[#535353]">
+          <SkipBack size={18} className="cursor-not-allowed" />
+          <div className="w-8 h-8 rounded-full border border-[#535353] flex items-center justify-center cursor-not-allowed">
+            <Play size={14} className="text-[#535353] fill-[#535353] ml-0.5" />
+          </div>
+          <SkipForward size={18} className="cursor-not-allowed" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="hidden md:flex h-[90px] shrink-0 bg-[#181818] border-t border-[#282828] items-center px-4 gap-4 select-none" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Track Info */}
+      <div className="flex items-center gap-3 w-[220px] lg:w-[280px] shrink-0">
+        <div className="w-12 h-12 lg:w-14 lg:h-14 rounded overflow-hidden bg-[#282828] shrink-0">
+          {track.album?.images?.[0]?.url ? (
+            <img src={track.album.images[0].url} className="w-full h-full object-cover" alt="" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center"><Music2 size={20} className="text-white/60" /></div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-white text-[12px] lg:text-[13px] font-semibold truncate" title={track.name}>{track.name}</p>
+          <p className="text-[#B3B3B3] text-[11px] lg:text-[12px] truncate" title={track.artists?.map((a: any) => a.name).join(", ")}>
+            {track.artists?.map((a: any) => a.name).join(", ")}
+          </p>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex-1 flex flex-col items-center gap-2 max-w-[600px] mx-auto">
+        <div className="flex items-center gap-4 lg:gap-5">
+          <button onClick={handleShuffle}
+            className={`transition-colors hidden md:block cursor-pointer ${shuffle ? "text-[#1DB954]" : "text-[#B3B3B3] hover:text-white"}`}>
+            <Shuffle size={16} />
+          </button>
+          <button onClick={handlePrevious} className="text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"><SkipBack size={18} /></button>
+          <button onClick={handlePlayPause}
+            className="w-8 h-8 bg-white rounded-full flex items-center justify-center hover:scale-105 transition-transform cursor-pointer">
+            {isPlaying ? <Pause size={16} className="text-black" /> : <Play size={16} className="text-black fill-black ml-0.5" />}
+          </button>
+          <button onClick={handleNext} className="text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"><SkipForward size={18} /></button>
+          <button onClick={handleRepeat}
+            className={`transition-colors hidden md:block cursor-pointer ${repeat !== "off" ? "text-[#1DB954]" : "text-[#B3B3B3] hover:text-white"}`}>
+            <Repeat size={16} />
+          </button>
+        </div>
+        <div className="flex items-center gap-2 w-full">
+          <span className="text-[#B3B3B3] text-[10px] lg:text-[11px] font-mono w-7 lg:w-8 text-right">
+            {formatDuration(localProgressPct !== null ? Math.round((localProgressPct / 100) * durationMs) : progressMs)}
+          </span>
+          <div className="flex-1 relative group h-1">
+            <div className="absolute inset-0 bg-[#535353] rounded-full" />
+            <div className="absolute left-0 top-0 h-full bg-white group-hover:bg-[#1DB954] rounded-full transition-colors" style={{ width: `${progressPct}%` }} />
+            <input type="range" min={0} max={100} value={progressPct}
+              onChange={handleProgressChange}
+              onMouseUp={handleProgressSeekEnd}
+              onTouchEnd={handleProgressSeekEnd}
+              className="absolute inset-0 w-full opacity-0 cursor-pointer h-full" />
+          </div>
+          <span className="text-[#B3B3B3] text-[10px] lg:text-[11px] font-mono w-7 lg:w-8">{formatDuration(durationMs)}</span>
+        </div>
+      </div>
+
+      {/* Volume */}
+      <div className="hidden lg:flex items-center gap-2 w-[200px] shrink-0 justify-end">
+        <button className="text-[#B3B3B3] hover:text-white transition-colors cursor-pointer">
+          <Volume2 size={16} />
+        </button>
+        <div className="relative w-24 group h-1">
+          <div className="absolute inset-0 bg-[#535353] rounded-full" />
+          <div className="absolute left-0 top-0 h-full bg-white group-hover:bg-[#1DB954] rounded-full transition-colors" style={{ width: `${volume}%` }} />
+          <input type="range" min={0} max={100} value={volume} onChange={handleVolumeChange}
+            className="absolute inset-0 w-full opacity-0 cursor-pointer h-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Helper to format ms to MM:SS inside player
+function formatDuration(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+// ─── Page: Search ─────────────────────────────────────────────────────────────
+
+function SearchPage({ topArtists }: { topArtists: Artist[] }) {
+  const [query, setQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "tracks" | "artists" | "playlists" | "albums">("all");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<{
+    tracks: Track[];
+    artists: Artist[];
+    playlists: Playlist[];
+    albums: any[];
+  }>({ tracks: [], artists: [], playlists: [], albums: [] });
+
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const q = query.toLowerCase().trim();
+
+  React.useEffect(() => {
+    if (!q) {
+      setResults({ tracks: [], artists: [], playlists: [], albums: [] });
+      return;
+    }
+
+    setLoading(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const searchResults = await searchSpotify(q);
+        setResults(searchResults);
+      } catch (err) {
+        console.error("Search failed:", err);
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [q]);
+
+  const matchedTracks = results.tracks;
+  const matchedArtists = results.artists;
+  const matchedPlaylists = results.playlists;
+  const matchedAlbums = results.albums;
+
+  const hasResults =
+    matchedTracks.length > 0 ||
+    matchedArtists.length > 0 ||
+    matchedPlaylists.length > 0 ||
+    matchedAlbums.length > 0;
+
+  const showBrowse = q === "";
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Sticky search bar */}
+      <div className="sticky top-0 z-20 bg-[#121212]/95 backdrop-blur-sm px-8 pt-6 pb-4 border-b border-[#282828]/60">
+        <div className="relative max-w-xl">
+          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="What do you want to listen to?"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="w-full pl-12 pr-10 py-3 bg-white rounded-full text-[15px] text-black placeholder-[#6b6b6b] outline-none focus:ring-2 focus:ring-white/40 transition-all"
+          />
+          {query && (
+            <button onClick={() => setQuery("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6b6b6b] hover:text-black transition-colors">
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
+        {/* Filter pills — only when searching */}
+        {q !== "" && (
+          <div className="flex items-center gap-2 mt-4">
+            {SEARCH_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setActiveFilter(f.key)}
+                className={`px-4 py-1.5 rounded-full text-[13px] font-semibold transition-colors ${activeFilter === f.key ? "bg-white text-black" : "bg-[#282828] text-white hover:bg-[#383838]"}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="px-8 py-6">
+        {/* Loading spinner */}
+        {loading && q !== "" && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-t-transparent border-[#1DB954] mb-3"></div>
+            <p className="text-[#B3B3B3] text-sm">Searching Spotify...</p>
+          </div>
+        )}
+
+        {/* Browse genres when empty */}
+        {showBrowse && (
+          <>
+            <h2 className="text-white text-[18px] font-bold mb-5">Browse Categories</h2>
+            <div className="grid grid-cols-4 gap-3">
+              {BROWSE_CATEGORIES.map(cat => (
+                <button key={cat.label} onClick={() => setQuery(cat.label)}
+                  className={`relative h-24 rounded-lg overflow-hidden ${cat.color} hover:brightness-110 transition-all text-left px-4 py-3 group`}>
+                  <span className="text-white font-bold text-[16px] drop-shadow">{cat.label}</span>
+                  <Music2 size={48} className="absolute -bottom-2 -right-2 text-white/20 rotate-12 group-hover:text-white/30 transition-colors" />
+                </button>
+              ))}
+            </div>
+
+            <h2 className="text-white text-[18px] font-bold mt-10 mb-5">Your Top Artists</h2>
+            <div className="grid grid-cols-5 gap-4">
+              {topArtists.slice(0, 5).map(artist => (
+                <button key={artist.name} onClick={() => setQuery(artist.name)}
+                  className="group flex flex-col items-center gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-center">
+                  <div className="w-20 h-20 rounded-full flex items-center justify-center relative bg-[#282828] overflow-hidden shrink-0">
+                    {artist.cover.startsWith("http") ? (
+                      <img src={artist.cover} className="w-full h-full object-cover rounded-full" alt="" />
+                    ) : (
+                      <Mic2 size={26} className="text-white/60" />
+                    )}
+                    <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Play size={20} className="text-white fill-white ml-0.5" />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-white text-[13px] font-semibold truncate max-w-[110px]">{artist.name}</p>
+                    <p className="text-[#B3B3B3] text-[11px] truncate max-w-[110px]">Artist</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* No results */}
+        {!loading && q !== "" && !hasResults && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <Music2 size={48} className="text-[#535353] mb-4" />
+            <p className="text-white text-[18px] font-bold mb-2">No results found for "{query}"</p>
+            <p className="text-[#B3B3B3] text-[14px]">Please make sure your words are spelled correctly, or use fewer or different keywords.</p>
+          </div>
+        )}
+
+        {/* Results */}
+        {!loading && q !== "" && hasResults && (
+          <div className="space-y-8">
+            {/* Top Result + Tracks — show side by side */}
+            {(activeFilter === "all" || activeFilter === "tracks") && matchedTracks.length > 0 && (
+              <div className={`grid gap-6 ${activeFilter === "all" && matchedTracks.length > 1 ? "grid-cols-[280px_1fr]" : "grid-cols-1"}`}>
+                {/* Top Result card */}
+                {activeFilter === "all" && (
+                  <div>
+                    <h2 className="text-white text-[18px] font-bold mb-4">Top Result</h2>
+                    <div
+                      onClick={() => playTrack({ uris: [`spotify:track:${matchedTracks[0].id}`] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                      className="bg-[#181818] hover:bg-[#282828] transition-colors rounded-lg p-5 cursor-pointer group h-[220px] flex flex-col justify-between"
+                    >
+                      <div className="w-20 h-20 rounded-lg bg-gradient-to-br from-violet-800 to-purple-950 flex items-center justify-center shadow-lg overflow-hidden shrink-0">
+                        <Music2 size={32} className="text-white/70 animate-pulse" />
+                      </div>
+                      <div>
+                        <p className="text-white text-[22px] font-extrabold leading-tight truncate">{matchedTracks[0].title}</p>
+                        <p className="text-[#B3B3B3] text-[13px] mt-1 truncate">{matchedTracks[0].artist} · Track</p>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity self-end">
+                        <div className="w-12 h-12 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl">
+                          <Play size={20} className="text-black fill-black ml-0.5" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tracks list */}
+                <div>
+                  <h2 className="text-white text-[18px] font-bold mb-4">Tracks</h2>
+                  <div className="space-y-1">
+                    {(activeFilter === "all" ? matchedTracks.slice(0, 5) : matchedTracks).map((track, i) => (
+                      <div
+                        key={track.id}
+                        onClick={() => playTrack({ uris: [`spotify:track:${track.id}`] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                        className="group flex items-center gap-4 px-3 py-2 rounded-md hover:bg-[#282828] transition-colors cursor-pointer"
+                      >
+                        <span className="text-[#B3B3B3] text-[13px] font-mono w-4 text-right group-hover:hidden">{i + 1}</span>
+                        <Play size={13} className="text-white fill-white hidden group-hover:block w-4" />
+                        <div className="w-10 h-10 bg-[#282828] rounded shrink-0 flex items-center justify-center">
+                          <Music2 size={14} className="text-[#B3B3B3]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-[14px] font-semibold truncate">{track.title}</p>
+                          <p className="text-[#B3B3B3] text-[12px] truncate">{track.artist}</p>
+                        </div>
+                        <p className="text-[#B3B3B3] text-[13px] truncate hidden md:block max-w-[160px]">{track.album}</p>
+                        <p className="text-[#B3B3B3] text-[12px] font-mono">{track.duration}</p>
+                        <button className="text-[#B3B3B3] hover:text-white opacity-0 group-hover:opacity-100 transition-all" onClick={e => e.stopPropagation()}>
+                          <MoreHorizontal size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Artists */}
+            {(activeFilter === "all" || activeFilter === "artists") && matchedArtists.length > 0 && (
+              <div>
+                <h2 className="text-white text-[18px] font-bold mb-4">Artists</h2>
+                <div className="grid grid-cols-5 gap-4">
+                  {matchedArtists.map(artist => (
+                    <button key={artist.name}
+                      className="group flex flex-col items-center gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-center">
+                      <div className="relative w-full aspect-square rounded-full flex items-center justify-center bg-[#282828] overflow-hidden shrink-0">
+                        {artist.cover.startsWith("http") ? (
+                          <img src={artist.cover} className="w-full h-full object-cover rounded-full" alt="" />
+                        ) : (
+                          <Mic2 size={28} className="text-white/60" />
+                        )}
+                        <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <Play size={22} className="text-white fill-white ml-0.5" />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-white text-[13px] font-semibold truncate max-w-[110px]">{artist.name}</p>
+                        <p className="text-[#B3B3B3] text-[11px] truncate max-w-[110px]">Artist</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Albums */}
+            {(activeFilter === "all" || activeFilter === "albums") && matchedAlbums.length > 0 && (
+              <div>
+                <h2 className="text-white text-[18px] font-bold mb-4">Albums</h2>
+                <div className="grid grid-cols-4 xl:grid-cols-6 gap-4">
+                  {matchedAlbums.map(t => (
+                    <button key={t.album}
+                      className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left">
+                      <div className="relative w-full aspect-square rounded-md bg-gradient-to-br from-slate-700 to-zinc-900 flex items-center justify-center overflow-hidden">
+                        {t.cover.startsWith("http") ? (
+                          <img src={t.cover} className="w-full h-full object-cover" alt="" />
+                        ) : (
+                          <Music2 size={28} className="text-white/40" />
+                        )}
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                          <div className="w-9 h-9 bg-[#1DB954] rounded-full flex items-center justify-center">
+                            <Play size={14} className="text-black fill-black ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white text-[13px] font-semibold truncate">{t.album}</p>
+                        <p className="text-[#B3B3B3] text-[12px] truncate">{t.releaseYear} · {t.artist}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Playlists */}
+            {(activeFilter === "all" || activeFilter === "playlists") && matchedPlaylists.length > 0 && (
+              <div>
+                <h2 className="text-white text-[18px] font-bold mb-4">Playlists</h2>
+                <div className="grid grid-cols-4 xl:grid-cols-6 gap-4">
+                  {matchedPlaylists.map(pl => (
+                    <button
+                      key={pl.id}
+                      onClick={() => playTrack({ contextUri: `spotify:playlist:${pl.id}` }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                      className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left"
+                    >
+                      <div className="relative w-full aspect-square rounded-md overflow-hidden bg-[#282828] shrink-0">
+                        {pl.cover.startsWith("http") ? (
+                          <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                        ) : (
+                          <div className={`w-full h-full ${pl.cover}`} />
+                        )}
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                          <div className="w-9 h-9 bg-[#1DB954] rounded-full flex items-center justify-center">
+                            <Play size={14} className="text-black fill-black ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white text-[13px] font-semibold truncate">{pl.name}</p>
+                        <p className="text-[#B3B3B3] text-[12px] truncate">Playlist · {pl.tracks} tracks</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Page: All Libraries ────────────────────────────────────────────────────────
+
+function AllLibraries({
+  setPage,
+  playlists,
+  playlistTracks,
+  selectedPlaylistId,
+  setSelectedPlaylistId,
+  topArtists,
+}: {
+  setPage: (p: Page) => void;
+  playlists: Playlist[];
+  playlistTracks: Track[];
+  selectedPlaylistId: string | number;
+  setSelectedPlaylistId: (id: string | number) => void;
+  topArtists: Artist[];
+}) {
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"name" | "tracks" | "recent">("name");
+
+  const totalUniqueMs = playlistTracks.reduce((sum, t) => sum + t.durationMs, 0);
+  const totalHours = Math.floor(totalUniqueMs / 3600000);
+  const totalMin = Math.floor((totalUniqueMs % 3600000) / 60000);
+
+  const filteredPlaylists = playlists.filter(pl =>
+    pl.name.toLowerCase().includes(search.toLowerCase()) || pl.desc.toLowerCase().includes(search.toLowerCase())
+  ).sort((a, b) => {
+    if (sortBy === "tracks") return b.tracks - a.tracks;
+    if (sortBy === "name") return a.name.localeCompare(b.name);
+    return String(b.id).localeCompare(String(a.id));
+  });
+
+  const avgBpm = playlistTracks.length > 0 ? Math.round(playlistTracks.reduce((s, t) => s + t.bpm, 0) / playlistTracks.length) : 120;
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Hero Banner */}
+      <div className="bg-gradient-to-b from-[#0f2a1a] via-[#121212] to-[#121212] px-8 pt-8 pb-6">
+        <div className="flex items-end gap-6 mb-6">
+          <div className="w-[140px] h-[140px] bg-gradient-to-br from-[#1DB954]/40 to-[#1DB954]/10 border border-[#1DB954]/30 rounded-xl flex flex-col items-center justify-center gap-2 shadow-2xl shrink-0">
+            <Library size={44} className="text-[#1DB954]" />
+            <span className="text-[#1DB954] text-[11px] font-bold uppercase tracking-widest">All Songs</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3] mb-1">Conditional Playlist</p>
+            <h1 className="text-white text-[40px] font-extrabold leading-none mb-3">All Libraries</h1>
+            <p className="text-[#B3B3B3] text-[13px] mb-4 max-w-xl">
+              Dynamically compiled from all your playlists and saved tracks. Deduplicated by Spotify Track URI across {playlists.length} sources.
+            </p>
+            <div className="flex items-center gap-5 text-[13px] flex-wrap">
+              <span className="text-white font-semibold">{playlistTracks.length} unique tracks</span>
+              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
+              <span className="text-[#B3B3B3]">{totalHours} hr {totalMin} min</span>
+              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
+              <span className="text-[#B3B3B3]">{playlists.length} source playlists</span>
+              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
+              <span className="text-[#1DB954] flex items-center gap-1 font-semibold"><RefreshCw size={11} /> Synced · just now</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <button onClick={() => {
+              if (playlistTracks.length > 0) {
+                playTrack({ uris: playlistTracks.map(t => `spotify:track:${t.id}`) })
+                  .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
+              }
+            }} className="w-14 h-14 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer">
+              <Play size={24} className="text-black fill-black ml-0.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Aggregate stats strip */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: "Source Playlists", value: String(playlists.length), icon: ListMusic, color: "text-blue-400" },
+            { label: "Unique Tracks", value: String(playlistTracks.length), icon: Music2, color: "text-[#1DB954]" },
+            { label: "Unique Artists", value: String(topArtists.length), icon: Mic2, color: "text-purple-400" },
+            { label: "Avg. BPM", value: String(avgBpm), icon: Zap, color: "text-amber-400" },
+            { label: "Sync Status", value: "OK", icon: Check, color: "text-emerald-400" },
+          ].map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="bg-[#181818] rounded-lg px-4 py-3 border border-[#282828] flex items-center gap-3">
+              <Icon size={18} className={color} />
+              <div>
+                <p className={`text-[20px] font-bold ${color}`}>{value}</p>
+                <p className="text-[#B3B3B3] text-[11px]">{label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-8 py-4 border-b border-[#282828] sticky top-0 z-10 bg-[#121212]/95 backdrop-blur-sm">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
+          <input type="text" placeholder="Filter playlists..." value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-[#282828] rounded text-[13px] text-white placeholder-[#B3B3B3] border border-transparent focus:border-white/20 outline-none" />
+        </div>
+        <div className="flex items-center gap-1 bg-[#282828] rounded p-1 text-[12px]">
+          {(["name", "tracks", "recent"] as const).map(opt => (
+            <button key={opt} onClick={() => setSortBy(opt)}
+              className={`px-3 py-1 rounded capitalize transition-colors font-medium ${sortBy === opt ? "bg-[#383838] text-white" : "text-[#B3B3B3] hover:text-white"}`}>
+              {opt === "recent" ? "Recently Added" : opt}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-1 bg-[#282828] rounded p-1">
+          <button onClick={() => setViewMode("grid")}
+            className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-[#383838] text-white" : "text-[#B3B3B3] hover:text-white"}`}>
+            <Columns3 size={15} />
+          </button>
+          <button onClick={() => setViewMode("list")}
+            className={`p-1.5 rounded transition-colors ${viewMode === "list" ? "bg-[#383838] text-white" : "text-[#B3B3B3] hover:text-white"}`}>
+            <ListMusic size={15} />
+          </button>
+        </div>
+      </div>
+
+      <div className="px-8 py-6">
+        {/* All Songs flat table — a compact preview */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white text-[16px] font-bold">All Aggregated Tracks</h2>
+            <button onClick={() => setPage("workspace")}
+              className="text-[13px] text-[#1DB954] font-semibold hover:underline flex items-center gap-1">
+              Open in Workspace <ChevronRight size={14} />
+            </button>
+          </div>
+          <div className="bg-[#181818] rounded-lg border border-[#282828] overflow-hidden">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b border-[#282828]">
+                  <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold w-8">#</th>
+                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">Title</th>
+                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">Artist</th>
+                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Album</th>
+                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Genre</th>
+                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">BPM</th>
+                  <th className="px-3 py-3 text-right text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold"><Clock size={12} className="inline" /></th>
+                </tr>
+              </thead>
+              <tbody>
+                {playlistTracks.map((track, i) => (
+                  <tr key={track.id}
+                    onClick={() => playTrack({ uris: [`spotify:track:${track.id}`] }).catch(() => toast.error("Could not play track."))}
+                    className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${i % 2 === 0 ? "" : "bg-[#181818]/60"}`}>
+                    <td className="px-4 py-2.5">
+                      <span className="text-[#B3B3B3] text-[12px] font-mono group-hover:hidden">{i + 1}</span>
+                      <Play size={12} className="text-white fill-white hidden group-hover:block" />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 h-7 bg-[#282828] rounded shrink-0 flex items-center justify-center"><Music2 size={11} className="text-[#B3B3B3]" /></div>
+                        <span className="text-white text-[13px] font-medium truncate max-w-[160px]">{track.title}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[13px]">{track.artist}</td>
+                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[13px] hidden xl:table-cell truncate max-w-[140px]">{track.album}</td>
+                    <td className="px-3 py-2.5 hidden xl:table-cell">
+                      <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full">{track.genre}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">{track.bpm}</td>
+                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono text-right">{track.duration}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Source Playlists */}
+        <div>
+          <h2 className="text-white text-[16px] font-bold mb-4">Source Playlists <span className="text-[#B3B3B3] font-normal text-[14px]">({filteredPlaylists.length})</span></h2>
+          {viewMode === "grid" ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-4">
+              {filteredPlaylists.map(pl => (
+                <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
+                  className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border border-white/5">
+                  <div className={`relative w-full aspect-square rounded-md overflow-hidden bg-[#282828] shrink-0`}>
+                    {pl.cover.startsWith("http") ? (
+                      <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                    ) : (
+                      <div className={`w-full h-full ${pl.cover}`} />
+                    )}
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                      <div className="w-9 h-9 bg-[#1DB954] rounded-full flex items-center justify-center">
+                        <Play size={14} className="text-black fill-black ml-0.5" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-white font-semibold text-[14px] truncate">{pl.name}</p>
+                    <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">{pl.desc}</p>
+                    <p className="text-[#B3B3B3] text-[11px] mt-1">{pl.tracks} tracks</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-[#181818] rounded-lg border border-[#282828] overflow-hidden">
+              {filteredPlaylists.map((pl, i) => (
+                <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
+                  className={`group w-full flex items-center gap-4 px-4 py-3 hover:bg-[#282828] transition-colors text-left ${i < filteredPlaylists.length - 1 ? "border-b border-[#282828]" : ""}`}>
+                  <div className="w-12 h-12 rounded shrink-0 bg-[#282828] overflow-hidden">
+                    {pl.cover.startsWith("http") ? (
+                      <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                    ) : (
+                      <div className={`w-full h-full ${pl.cover}`} />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-[14px] font-semibold truncate">{pl.name}</p>
+                    <p className="text-[#B3B3B3] text-[12px] truncate">{pl.desc}</p>
+                  </div>
+                  <span className="text-[#B3B3B3] text-[13px] font-mono shrink-0">{pl.tracks} tracks</span>
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Play size={16} className="text-white fill-white" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Library Playlists ────────────────────────────────────────────────────────
+
+type PlSortKey = "none" | "name" | "tracks";
+type PlGroupKey = "none" | "size";
+type ViewSize = "large" | "medium" | "small";
+
+function LibraryPlaylists({
+  onOpen,
+  selectedView,
+  playlists,
+  likedSongsCount,
+  selectedPlaylistId,
+  setSelectedPlaylistId,
+}: {
+  onOpen: () => void;
+  selectedView: "yours" | "all" | "followed";
+  playlists: Playlist[];
+  likedSongsCount: number;
+  selectedPlaylistId: string | number;
+  setSelectedPlaylistId: (id: string | number) => void;
+}) {
+  // Load preferences from cache
+  const preferences = loadPreferences();
+
+  const [sortKey, setSortKey] = useState<PlSortKey>(preferences.playlistSortKey);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(preferences.playlistSortDir);
+  const [groupKey, setGroupKey] = useState<PlGroupKey>(preferences.playlistGroupKey);
+  const [viewSize, setViewSize] = useState<ViewSize>(preferences.playlistViewSize);
+  const [customOrder, setCustomOrder] = useState<string[]>(preferences.playlistOrder);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+  const groupRef = useRef<HTMLDivElement>(null);
+  const dragItemRef = useRef<string | null>(null);
+  const dragOverItemRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
+      if (groupRef.current && !groupRef.current.contains(e.target as Node)) setGroupOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Save preferences when they change
+  useEffect(() => {
+    PreferenceUpdaters.setPlaylistSort(sortKey, sortDir);
+  }, [sortKey, sortDir]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setPlaylistGroup(groupKey);
+  }, [groupKey]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setPlaylistViewSize(viewSize);
+  }, [viewSize]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setPlaylistOrder(customOrder);
+  }, [customOrder]);
+
+  // Filter based on selected view
+  const filtered = selectedView === "all"
+    ? playlists
+    : playlists.filter(pl => pl.owner === selectedView);
+
+  // Apply custom order if no sorting is active
+  const reordered = sortKey === "none" && customOrder.length > 0
+    ? [...filtered].sort((a, b) => {
+      const aIdx = customOrder.indexOf(String(a.id));
+      const bIdx = customOrder.indexOf(String(b.id));
+      if (aIdx === -1 && bIdx === -1) return 0;
+      if (aIdx === -1) return 1;
+      if (bIdx === -1) return -1;
+      return aIdx - bIdx;
+    })
+    : filtered;
+
+  const sorted = sortKey === "none" ? reordered : [...reordered].sort((a, b) => {
+    const va = sortKey === "name" ? a.name : a.tracks;
+    const vb = sortKey === "name" ? b.name : b.tracks;
+    const cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const sizeLabel = (n: number) => n < 40 ? "Small" : n < 80 ? "Medium" : "Large";
+
+  type Group = { label: string; items: Playlist[] };
+  const grouped: Group[] = groupKey === "none"
+    ? [{ label: "", items: sorted }]
+    : Array.from(
+      sorted.reduce((map, pl) => {
+        const key = sizeLabel(pl.tracks);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(pl);
+        return map;
+      }, new Map<string, Playlist[]>())
+    ).map(([label, items]) => ({ label, items }));
+
+  const toggleSort = (key: PlSortKey) => {
+    if (key === "none") { setSortKey("none"); return; }
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (playlistId: string | number) => {
+    dragItemRef.current = String(playlistId);
+  };
+
+  const handleDragEnter = (playlistId: string | number) => {
+    dragOverItemRef.current = String(playlistId);
+  };
+
+  const handleDragEnd = () => {
+    const draggedId = dragItemRef.current;
+    const targetId = dragOverItemRef.current;
+
+    if (!draggedId || !targetId || draggedId === targetId) {
+      dragItemRef.current = null;
+      dragOverItemRef.current = null;
+      return;
+    }
+
+    // Only allow reordering when no sort is active
+    if (sortKey !== "none") {
+      dragItemRef.current = null;
+      dragOverItemRef.current = null;
+      return;
+    }
+
+    // Get the full list of playlist IDs
+    const allIds = sorted.map(pl => String(pl.id));
+
+    // Update custom order
+    const newOrder = [...allIds];
+    const draggedIndex = newOrder.indexOf(String(draggedId));
+    const targetIndex = newOrder.indexOf(String(targetId));
+
+    if (draggedIndex !== -1 && targetIndex !== -1) {
+      newOrder.splice(draggedIndex, 1);
+      newOrder.splice(targetIndex, 0, String(draggedId));
+      setCustomOrder(newOrder);
+    }
+
+    dragItemRef.current = null;
+    dragOverItemRef.current = null;
+  };
+
+  const isDraggable = sortKey === "none" && groupKey === "none";
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 px-2 pt-2 pb-2">
+      {/* toolbar */}
+      <div className="flex items-center gap-1 px-2 pb-2">
+        {/* Group by */}
+        <div ref={groupRef} className="relative">
+          <button onClick={() => setGroupOpen(o => !o)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${groupKey !== "none" ? "text-[#1DB954]" : "text-[#B3B3B3] hover:text-white"}`}>
+            <Library size={11} />
+            {groupKey !== "none" ? "Grouped" : "Group"}
+          </button>
+          {groupOpen && (
+            <div className="absolute top-full left-0 mt-1 w-36 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+              {(["none", "size"] as PlGroupKey[]).map(opt => (
+                <button key={opt} onClick={() => { setGroupKey(opt); setGroupOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] capitalize hover:bg-[#383838] transition-colors ${groupKey === opt ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
+                  {opt === "none" ? "None" : "By Size"}
+                  {groupKey === opt && <Check size={10} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Sort by */}
+        <div ref={sortRef} className="relative">
+          <button onClick={() => setSortOpen(o => !o)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${sortKey !== "none" ? "text-[#1DB954]" : "text-[#B3B3B3] hover:text-white"}`}>
+            <ArrowUpDown size={11} />
+            <span>Sort</span>
+          </button>
+          {sortOpen && (
+            <div className="absolute top-full left-0 mt-1 w-36 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+              {(["none", "name", "tracks"] as PlSortKey[]).map(opt => (
+                <button key={opt} onClick={() => { toggleSort(opt); setSortOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors ${sortKey === opt ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
+                  {opt === "none" ? "None" : opt === "name" ? "Name" : "Track count"}
+                  {sortKey === opt && opt !== "none" && <span className="font-mono text-[11px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
+                  {sortKey === opt && opt === "none" && <Check size={10} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* View Size Radio Buttons */}
+      <div className="px-2 pb-3">
+        <div className="bg-[#282828] rounded p-1 border border-[#383838] flex items-center gap-1">
+          {([
+            { key: "large", icon: Grid3x3, label: "Large" },
+            { key: "medium", icon: Grid2x2, label: "Medium" },
+            { key: "small", icon: Rows3, label: "Small" }
+          ] as { key: ViewSize; icon: React.ElementType; label: string }[]).map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              onClick={() => setViewSize(key)}
+              title={label}
+              className={`flex-1 flex items-center justify-center p-1.5 rounded transition-colors ${viewSize === key
+                  ? "bg-[#1DB954]/20 text-[#1DB954]"
+                  : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"
+                }`}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* list */}
+      <div className="overflow-y-auto flex-1 space-y-0.5 no-scrollbar">
+        {viewSize === "large" ? (
+          // Large Grid Photos View
+          <div className="grid grid-cols-2 gap-2 px-2">
+            {likedSongsCount > 0 && (
+              <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
+                className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "liked" ? "border-[#1DB954]" : "border-white/5"}`}>
+                <div className="relative w-full aspect-square rounded bg-gradient-to-br from-[#450af5] to-[#8134af] overflow-hidden flex items-center justify-center">
+                  <Heart size={32} className="text-white fill-white" />
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                    <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                      <Play size={12} className="text-black fill-black ml-0.5" />
+                    </div>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white text-[12px] font-semibold truncate">Liked Songs</p>
+                  <p className="text-[#B3B3B3] text-[10px]">{likedSongsCount.toLocaleString()} tracks</p>
+                </div>
+              </button>
+            )}
+            {/* All My Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
+              className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_my" ? "border-[#1DB954]" : "border-white/5"}`}>
+              <div className="relative w-full aspect-square rounded bg-gradient-to-br from-blue-600 to-indigo-700 overflow-hidden flex items-center justify-center">
+                <ListMusic size={32} className="text-white" />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                  <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                    <Play size={12} className="text-black fill-black ml-0.5" />
+                  </div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-[12px] font-semibold truncate">All My Songs</p>
+                <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
+              </div>
+            </button>
+            {/* All Followed Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
+              className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_followed" ? "border-[#1DB954]" : "border-white/5"}`}>
+              <div className="relative w-full aspect-square rounded bg-gradient-to-br from-purple-600 to-violet-700 overflow-hidden flex items-center justify-center">
+                <RadioTower size={32} className="text-white" />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                  <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                    <Play size={12} className="text-black fill-black ml-0.5" />
+                  </div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-[12px] font-semibold truncate">All Followed</p>
+                <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
+              </div>
+            </button>
+            {/* All Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
+              className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_songs" ? "border-[#1DB954]" : "border-white/5"}`}>
+              <div className="relative w-full aspect-square rounded bg-gradient-to-br from-emerald-600 to-teal-700 overflow-hidden flex items-center justify-center">
+                <Music2 size={32} className="text-white" />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                  <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                    <Play size={12} className="text-black fill-black ml-0.5" />
+                  </div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-[12px] font-semibold truncate">All Songs</p>
+                <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
+              </div>
+            </button>
+            {grouped.flatMap(({ items }) => items).map(pl => (
+              <button
+                key={pl.id}
+                onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
+                draggable={isDraggable}
+                onDragStart={() => handleDragStart(pl.id)}
+                onDragEnter={() => handleDragEnter(pl.id)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => e.preventDefault()}
+                className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "border-[#1DB954]" : "border-white/5"}`}>
+                <div className={`relative w-full aspect-square rounded overflow-hidden bg-[#282828]`}>
+                  {isDraggable && (
+                    <div className="absolute top-1 left-1 z-10 bg-black/60 rounded p-0.5">
+                      <GripVertical size={12} className="text-white" />
+                    </div>
+                  )}
+                  {pl.cover.startsWith("http") ? (
+                    <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                  ) : (
+                    <div className={`w-full h-full ${pl.cover}`} />
+                  )}
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                    <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                      <Play size={12} className="text-black fill-black ml-0.5" />
+                    </div>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white text-[12px] font-semibold truncate">{pl.name}</p>
+                  <p className="text-[#B3B3B3] text-[10px]">{pl.tracks} tracks</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : viewSize === "small" ? (
+          // Small List View
+          <>
+            {likedSongsCount > 0 && (
+              <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
+                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "liked" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
+                  <Heart size={10} className="text-white fill-white" />
+                </div>
+                <p className="text-white text-[11px] truncate">Liked Songs</p>
+              </button>
+            )}
+            {/* All My Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
+              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_my" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                <ListMusic size={10} className="text-white" />
+              </div>
+              <p className="text-white text-[11px] truncate">All My Songs</p>
+            </button>
+            {/* All Followed Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
+              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_followed" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                <RadioTower size={10} className="text-white" />
+              </div>
+              <p className="text-white text-[11px] truncate">All Followed Songs</p>
+            </button>
+            {/* All Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
+              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_songs" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
+                <Music2 size={10} className="text-white" />
+              </div>
+              <p className="text-white text-[11px] truncate">All Songs</p>
+            </button>
+            {grouped.map(({ label, items }) => (
+              <div key={label}>
+                {label && (
+                  <p className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#535353]">{label}</p>
+                )}
+                {items.map(pl => (
+                  <button
+                    key={pl.id}
+                    onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
+                    draggable={isDraggable}
+                    onDragStart={() => handleDragStart(pl.id)}
+                    onDragEnter={() => handleDragEnter(pl.id)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => e.preventDefault()}
+                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                    {isDraggable && <GripVertical size={12} className="text-[#535353] shrink-0" />}
+                    <div className="w-6 h-6 rounded shrink-0 bg-[#282828] overflow-hidden">
+                      {pl.cover.startsWith("http") ? (
+                        <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                      ) : (
+                        <div className={`w-full h-full ${pl.cover}`} />
+                      )}
+                    </div>
+                    <p className="text-white text-[11px] truncate">{pl.name}</p>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </>
+        ) : (
+          // Medium List View (Default)
+          <>
+            {likedSongsCount > 0 && (
+              <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
+                className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "liked" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
+                  <Heart size={14} className="text-white fill-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white text-[13px] truncate">Liked Songs</p>
+                  <p className="text-[#B3B3B3] text-[11px]">Playlist · {likedSongsCount.toLocaleString()} tracks</p>
+                </div>
+              </button>
+            )}
+            {/* All My Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_my" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                <ListMusic size={14} className="text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-[13px] truncate">All My Songs</p>
+                <p className="text-[#B3B3B3] text-[11px]">Compiled Virtual Playlist</p>
+              </div>
+            </button>
+            {/* All Followed Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_followed" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                <RadioTower size={14} className="text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-[13px] truncate">All Followed Songs</p>
+                <p className="text-[#B3B3B3] text-[11px]">Compiled Virtual Playlist</p>
+              </div>
+            </button>
+            {/* All Songs */}
+            <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_songs" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
+                <Music2 size={14} className="text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-[13px] truncate">All Songs</p>
+                <p className="text-[#B3B3B3] text-[11px]">Compiled Virtual Playlist</p>
+              </div>
+            </button>
+            {grouped.map(({ label, items }) => (
+              <div key={label}>
+                {label && (
+                  <p className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#535353]">{label}</p>
+                )}
+                {items.map(pl => (
+                  <button
+                    key={pl.id}
+                    onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
+                    draggable={isDraggable}
+                    onDragStart={() => handleDragStart(pl.id)}
+                    onDragEnter={() => handleDragEnter(pl.id)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => e.preventDefault()}
+                    className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                    {isDraggable && <GripVertical size={14} className="text-[#535353] shrink-0" />}
+                    <div className="w-8 h-8 rounded shrink-0 bg-[#282828] overflow-hidden">
+                      {pl.cover.startsWith("http") ? (
+                        <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                      ) : (
+                        <div className={`w-full h-full ${pl.cover}`} />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-white text-[13px] truncate">{pl.name}</p>
+                      <p className="text-[#B3B3B3] text-[11px]">Playlist · {pl.tracks} tracks</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Album Cell ───────────────────────────────────────────────────────────────
+
+function AlbumCell({ album }: { album: string }) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    const el = textRef.current;
+    const container = containerRef.current;
+    if (el && container) {
+      setOverflows(el.scrollWidth > container.offsetWidth);
+    }
+  }, [album]);
+
+  return (
+    <span ref={containerRef} className="inline-flex whitespace-nowrap overflow-hidden max-w-full">
+      <style>{`@keyframes marquee-loop{from{transform:translateX(0)}to{transform:translateX(-50%)}}`}</style>
+      {overflows ? (
+        <span className="inline-flex whitespace-nowrap group-hover:[animation:marquee-loop_5s_linear_infinite]">
+          <span ref={textRef} className="pr-4">{album}</span>
+          <span className="pr-4">{album}</span>
+        </span>
+      ) : (
+        <span ref={textRef} className="truncate">{album}</span>
+      )}
+    </span>
+  );
+}
+
+// ─── Root App ─────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const preferences = loadPreferences();
+  const [page, setPage] = useState<Page>(preferences.currentPage);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(preferences.sidebarCollapsed);
+
+  // Spotify integration state
+  const [authenticated, setAuthenticated] = useState<boolean>(false);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [likedSongsCount, setLikedSongsCount] = useState<number>(0);
+  const [recentlyPlayed, setRecentlyPlayed] = useState<any[]>([]);
+  const [topArtists, setTopArtists] = useState<Artist[]>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | number>("liked");
+  const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
+  const [loadingTracks, setLoadingTracks] = useState<boolean>(false);
+  const [loadingTracksProgress, setLoadingTracksProgress] = useState<number>(0);
+  const [playbackState, setPlaybackState] = useState<any>(null);
+  const playlistTrackCacheRef = useRef<WorkspaceTrackCache>(readWorkspaceTrackCache());
+  const workspaceLoadSessionRef = useRef(0);
+  // Feature flag: deprecated Spotify endpoints (audio-features, artists/genre)
+  const [enableDeprecatedApis, setEnableDeprecatedApis] = useState<boolean>(
+    () => loadPreferences().enableDeprecatedApis
+  );
+
+  // Sync flag to API module on mount and whenever it changes
+  useEffect(() => {
+    setDeprecatedApisEnabled(enableDeprecatedApis);
+    PreferenceUpdaters.setEnableDeprecatedApis(enableDeprecatedApis);
+  }, [enableDeprecatedApis]);
+
+  const handleToggleDeprecatedApis = () => {
+    setEnableDeprecatedApis(prev => !prev);
+  };
+
+  // Save preferences when they change
+  useEffect(() => {
+    PreferenceUpdaters.setCurrentPage(page);
+  }, [page]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setSidebarCollapsed(sidebarCollapsed);
+  }, [sidebarCollapsed]);
+
+  const updatePlaylistTracks = (updater: React.SetStateAction<Track[]>, playlistKey = String(selectedPlaylistId)) => {
+    setPlaylistTracks(prev => {
+      const next = typeof updater === "function"
+        ? (updater as (value: Track[]) => Track[])(prev)
+        : updater;
+      playlistTrackCacheRef.current = {
+        ...playlistTrackCacheRef.current,
+        [playlistKey]: next,
+      };
+      writeWorkspaceTrackCache(playlistTrackCacheRef.current);
+      return next;
+    });
+  };
+
+  // Auth check & callback resolution on mount
+  useEffect(() => {
+    const resolveAuth = async () => {
+      try {
+        const exchanged = await handleRedirectCallback();
+        const isAuth = isAuthenticatedSync();
+        setAuthenticated(isAuth);
+      } catch (err) {
+        console.error("Auth initialization failed:", err);
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+    resolveAuth();
+  }, []);
+  // Fetch initial profile & metadata once authenticated
+  useEffect(() => {
+    if (!authenticated) return;
+
+    const loadProfileData = async () => {
+      try {
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+
+        // Fetch remaining metrics independently so one missing scope does not block the rest.
+        const [userPlaylists, likedSongsResult, recentResult, topArtistsResult] = await Promise.allSettled([
+          getUserPlaylists(user.id),
+          getLikedSongsCount(),
+          getRecentlyPlayed(),
+          getTopArtists()
+        ]);
+
+        if (userPlaylists.status === "fulfilled") {
+          setPlaylists(userPlaylists.value);
+        } else {
+          console.error("Failed to load playlists:", userPlaylists.reason);
+        }
+
+        if (likedSongsResult.status === "fulfilled") {
+          setLikedSongsCount(likedSongsResult.value);
+        } else {
+          console.error("Failed to load liked songs count:", likedSongsResult.reason);
+        }
+
+        if (recentResult.status === "fulfilled") {
+          setRecentlyPlayed(recentResult.value);
+        } else {
+          console.error("Failed to load recently played tracks:", recentResult.reason);
+        }
+
+        if (topArtistsResult.status === "fulfilled") {
+          setTopArtists(topArtistsResult.value);
+        } else {
+          console.error("Failed to load top artists:", topArtistsResult.reason);
+        }
+      } catch (err) {
+        console.error("Failed to load user profile data:", err);
+      }
+    };
+
+    loadProfileData();
+  }, [authenticated]);
+
+  // Sync playlist tracks when selected playlist changes
+  useEffect(() => {
+    if (!authenticated || page !== "workspace") return;
+
+    const loadSession = ++workspaceLoadSessionRef.current;
+
+    const setWorkspaceLoadProgress = (progress: number) => {
+      if (workspaceLoadSessionRef.current === loadSession) {
+        setLoadingTracksProgress(progress);
+      }
+    };
+
+    const loadTracks = async () => {
+      const cacheKey = String(selectedPlaylistId);
+      const cachedTracks = playlistTrackCacheRef.current[cacheKey];
+      if (cachedTracks) {
+        if (workspaceLoadSessionRef.current === loadSession) {
+          setLoadingTracks(false);
+        }
+        updatePlaylistTracks(cachedTracks, cacheKey);
+        return;
+      }
+
+      setLoadingTracks(true);
+      setWorkspaceLoadProgress(0);
+      try {
+        let tracks: Track[] = [];
+        if (selectedPlaylistId === "all_my") {
+          const myPlaylists = playlists.filter(p => p.owner === "yours");
+          tracks = await getMultiPlaylistTracks(["liked", ...myPlaylists.map(p => p.id)], setWorkspaceLoadProgress);
+        } else if (selectedPlaylistId === "all_followed") {
+          const followedPlaylists = playlists.filter(p => p.owner === "followed");
+          tracks = await getMultiPlaylistTracks(followedPlaylists.map(p => p.id), setWorkspaceLoadProgress);
+        } else if (selectedPlaylistId === "all_songs") {
+          tracks = await getMultiPlaylistTracks(["liked", ...playlists.map(p => p.id)], setWorkspaceLoadProgress);
+        } else {
+          tracks = await getPlaylistTracks(selectedPlaylistId, setWorkspaceLoadProgress);
+        }
+        if (workspaceLoadSessionRef.current !== loadSession) {
+          return;
+        }
+        setWorkspaceLoadProgress(100);
+        updatePlaylistTracks(tracks, cacheKey);
+      } catch (err) {
+        console.error("Failed to load playlist tracks:", err);
+        toast.error("Failed to load tracks from Spotify.");
+      } finally {
+        if (workspaceLoadSessionRef.current === loadSession) {
+          setLoadingTracks(false);
+        }
+      }
+    };
+
+    loadTracks();
+  }, [authenticated, page, selectedPlaylistId, playlists]);
+
+  // Player state polling (every 4 seconds)
+  useEffect(() => {
+    if (!authenticated) return;
+
+    const pollPlayerState = async () => {
+      try {
+        const state = await getPlayerState();
+        setPlaybackState(state);
+      } catch (err) {
+        console.debug("Active player state polling error (Spotify might be idle):", err);
+      }
+    };
+
+    pollPlayerState();
+    const timer = setInterval(pollPlayerState, 4000);
+    return () => clearInterval(timer);
+  }, [authenticated]);
+
+  // Auth Loading Gating Screen
+  if (authChecking) {
+    return (
+      <div className="min-h-screen w-screen bg-[#09090b] flex flex-col items-center justify-center gap-4 text-white font-medium select-none">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-t-transparent border-[#1DB954]" />
+        <p className="text-sm text-[#B3B3B3] animate-pulse">Initializing Secure Connection...</p>
+      </div>
+    );
+  }
+
+  // Not Authenticated Gating Screen
+  if (!authenticated) {
+    return <Login />;
+  }
+
+  return (
+    <div className="dark flex flex-col h-screen w-screen overflow-hidden bg-[#121212]">
+      <div className="flex flex-1 min-h-0">
+        <Sidebar
+          page={page}
+          setPage={setPage}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(c => !c)}
+          playlists={playlists}
+          likedSongsCount={likedSongsCount}
+          selectedPlaylistId={selectedPlaylistId}
+          setSelectedPlaylistId={setSelectedPlaylistId}
+          currentUser={currentUser}
+        />
+        <main className="flex-1 min-w-0 relative overflow-hidden flex">
+          {page === "dashboard" && (
+            <Dashboard
+              setPage={setPage}
+              currentUser={currentUser}
+              playlists={playlists}
+              likedSongsCount={likedSongsCount}
+              recentlyPlayed={recentlyPlayed}
+              topArtists={topArtists}
+              selectedPlaylistId={selectedPlaylistId}
+              setSelectedPlaylistId={setSelectedPlaylistId}
+              playbackState={playbackState}
+              enableDeprecatedApis={enableDeprecatedApis}
+              onToggleDeprecatedApis={handleToggleDeprecatedApis}
+            />
+          )}
+          {page === "workspace" && (
+            <Workspace
+              playlists={playlists}
+              selectedPlaylistId={selectedPlaylistId}
+              setSelectedPlaylistId={setSelectedPlaylistId}
+              playlistTracks={playlistTracks}
+              loadingTracks={loadingTracks}
+              loadingTracksProgress={loadingTracksProgress}
+              setPlaylistTracks={updatePlaylistTracks}
+              likedSongsCount={likedSongsCount}
+              setLikedSongsCount={setLikedSongsCount}
+            />
+          )}
+          {page === "api" && <ApiReference />}
+          {page === "search" && <SearchPage topArtists={topArtists} />}
+          {page === "libraries" && (
+            <AllLibraries
+              setPage={setPage}
+              playlists={playlists}
+              playlistTracks={playlistTracks}
+              selectedPlaylistId={selectedPlaylistId}
+              setSelectedPlaylistId={setSelectedPlaylistId}
+              topArtists={topArtists}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="md:hidden flex items-center justify-around bg-[#000000] border-t border-[#282828] h-16 shrink-0 z-30">
+        <button onClick={() => setPage("dashboard")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "dashboard" ? "text-white" : "text-[#B3B3B3]"}`}>
+          <Home size={20} />
+          <span className="text-[10px] font-semibold">Home</span>
+        </button>
+        <button onClick={() => setPage("search")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "search" ? "text-white" : "text-[#B3B3B3]"}`}>
+          <Search size={20} />
+          <span className="text-[10px] font-semibold">Search</span>
+        </button>
+        <button onClick={() => setPage("workspace")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "workspace" ? "text-white" : "text-[#B3B3B3]"}`}>
+          <Library size={20} />
+          <span className="text-[10px] font-semibold">Library</span>
+        </button>
+        <button onClick={() => setPage("api")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "api" ? "text-white" : "text-[#B3B3B3]"}`}>
+          <Code2 size={20} />
+          <span className="text-[10px] font-semibold">API</span>
+        </button>
+      </nav>
+
+      <NowPlayingBar playbackState={playbackState} setPlaybackState={setPlaybackState} />
+    </div>
+  );
+}

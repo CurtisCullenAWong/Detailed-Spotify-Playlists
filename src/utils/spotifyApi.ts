@@ -1,0 +1,531 @@
+// Spotify Web API Client
+
+import { getAccessToken, logout } from "./spotifyAuth";
+import type { Track, Playlist, Artist } from "../data";
+
+const BASE_URL = "https://api.spotify.com/v1";
+
+// --- Deprecated-API Feature Flag ---
+// Controls whether the deprecated /audio-features and /artists (genre) calls are made.
+// Defaults to false (safe). Call setDeprecatedApisEnabled(true) to opt-in.
+let _deprecatedApisEnabled = false;
+
+export function setDeprecatedApisEnabled(enabled: boolean): void {
+  _deprecatedApisEnabled = enabled;
+}
+
+export function getDeprecatedApisEnabled(): boolean {
+  return _deprecatedApisEnabled;
+}
+
+// --- Shared sleep helper ---
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+type PlaylistProgressCallback = (progress: number) => void;
+
+const inFlightRequests = new Map<string, Promise<any>>();
+
+function buildRequestKey(url: string, options: RequestInit): string {
+  const method = (options.method || "GET").toUpperCase();
+  const body = typeof options.body === "string" ? options.body : options.body ? "[body]" : "";
+  return `${method} ${url} ${body}`;
+}
+
+// --- API Fetch Wrapper with 401 Auto-Retry + 429 Exponential Backoff ---
+
+export async function spotifyFetch(path: string, options: RequestInit = {}): Promise<any> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw new Error("No active Spotify session. Please log in.");
+  }
+
+  const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
+  const requestKey = buildRequestKey(url, options);
+  const existingRequest = inFlightRequests.get(requestKey);
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const requestPromise = (async () => {
+    try {
+      // Exponential backoff for rate limiting (up to 3 retries)
+      let response = await fetch(url, { ...options, headers });
+      for (let attempt = 0; attempt < 3 && response.status === 429; attempt++) {
+        const retryAfter = parseInt(response.headers.get("Retry-After") || "2", 10);
+        const waitMs = Math.max(retryAfter * 1000, 1000 * Math.pow(2, attempt));
+        console.warn(`Rate limited by Spotify. Waiting ${waitMs}ms before retry (attempt ${attempt + 1})...`);
+        await sleep(waitMs);
+        response = await fetch(url, { ...options, headers });
+      }
+
+      if (response.status === 401) {
+        // Access token might have expired. Try to get it again, which triggers auto-refresh
+        const newToken = await getAccessToken();
+        if (newToken) {
+          headers.set("Authorization", `Bearer ${newToken}`);
+          const retryResponse = await fetch(url, { ...options, headers });
+          if (retryResponse.status === 204) return null;
+          if (!retryResponse.ok) {
+            const errorBody = await retryResponse.text().catch(() => "");
+            throw new Error(`Spotify API error (${retryResponse.status}): ${retryResponse.statusText}. ${errorBody}`);
+          }
+          return retryResponse.json();
+        } else {
+          logout();
+          throw new Error("Session expired. Please log in again.");
+        }
+      }
+
+      if (response.status === 204) {
+        return null;
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
+        throw new Error(`Spotify API error (${response.status}): ${response.statusText}. ${errorBody}`);
+      }
+
+      return response.json();
+    } finally {
+      inFlightRequests.delete(requestKey);
+    }
+  })();
+
+  inFlightRequests.set(requestKey, requestPromise);
+  return requestPromise;
+}
+
+// --- Full Paginator: fetches all pages from a Spotify paged endpoint ---
+// Works with any endpoint returning { items, next, total } shaped responses.
+async function fetchAllPages<T>(
+  firstPagePath: string,
+  itemMapper: (item: any) => T,
+  delayMs = 100,
+  onProgress?: PlaylistProgressCallback
+): Promise<T[]> {
+  const results: T[] = [];
+  let nextUrl: string | null = firstPagePath.startsWith("http")
+    ? firstPagePath
+    : `${BASE_URL}${firstPagePath}`;
+  let totalItems: number | null = null;
+
+  while (nextUrl) {
+    const data = await spotifyFetch(nextUrl);
+    if (!data?.items) break;
+    totalItems = typeof data.total === "number" ? data.total : totalItems;
+
+    for (const item of data.items) {
+      if (item == null) continue; // skip nulls Spotify sends for deleted items
+      try {
+        results.push(itemMapper(item));
+      } catch (err) {
+        console.warn("fetchAllPages: skipping malformed item from Spotify:", err, item);
+      }
+    }
+
+    nextUrl = data.next ?? null;
+    if (onProgress && totalItems && totalItems > 0) {
+      onProgress(Math.min(100, Math.round((results.length / totalItems) * 100)));
+    }
+    if (nextUrl) await sleep(delayMs);
+  }
+
+  if (onProgress) onProgress(100);
+  return results;
+}
+
+// --- Dynamic Relative Time Formatter ---
+
+function formatRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "Yesterday";
+  return `${diffDays}d ago`;
+}
+
+// --- Duration Formatter (ms to MM:SS) ---
+
+function formatDuration(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+// --- Track Enrichment Helper (Batch fetch audio features & artist genres) ---
+
+export async function enrichTracks(tracks: any[]): Promise<Track[]> {
+  if (tracks.length === 0) return [];
+
+  const trackIds = tracks.map(t => t.id).filter(id => !!id);
+  const artistIds = Array.from(new Set(tracks.flatMap(t => t.artists?.map((a: any) => a.id) || []))).filter(id => !!id) as string[];
+
+  // 1. Fetch Audio Features (deprecated endpoint — only if feature flag is on)
+  const featuresMap = new Map<string, any>();
+  if (_deprecatedApisEnabled) {
+    for (let i = 0; i < trackIds.length; i += 50) {
+      const chunk = trackIds.slice(i, i + 50);
+      try {
+        const data = await spotifyFetch(`/audio-features?ids=${chunk.join(",")}`);
+        data.audio_features?.forEach((f: any) => {
+          if (f) featuresMap.set(f.id, f);
+        });
+      } catch (err) {
+        console.warn("Failed to fetch audio features chunk:", err);
+      }
+      if (i + 50 < trackIds.length) await sleep(200);
+    }
+  }
+
+  // 2. Fetch Artists for Genre mapping (deprecated endpoint — only if feature flag is on)
+  const genresMap = new Map<string, string>();
+  if (_deprecatedApisEnabled) {
+    for (let i = 0; i < artistIds.length; i += 50) {
+      const chunk = artistIds.slice(i, i + 50);
+      try {
+        const data = await spotifyFetch(`/artists?ids=${chunk.join(",")}`);
+        data.artists?.forEach((a: any) => {
+          if (a && a.genres && a.genres.length > 0) {
+            genresMap.set(a.id, a.genres[0]);
+          }
+        });
+      } catch (err) {
+        console.warn("Failed to fetch artists chunk:", err);
+      }
+      if (i + 50 < artistIds.length) await sleep(100);
+    }
+  }
+
+  // 3. Map tracks with enriched values
+  return tracks.map((t, idx) => {
+    const features = featuresMap.get(t.id);
+    const primaryArtistId = t.artists?.[0]?.id;
+    const genre = primaryArtistId ? genresMap.get(primaryArtistId) || "Pop" : "Pop";
+
+    return {
+      id: t.id,
+      title: t.name,
+      artist: t.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
+      album: t.album?.name || "Unknown Album",
+      cover: t.album?.images?.[0]?.url || "",
+      genre: genre.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+      releaseYear: t.album?.release_date ? new Date(t.album.release_date).getFullYear() : 2024,
+      dateAdded: t.added_at ? t.added_at.split("T")[0] : new Date().toISOString().split("T")[0],
+      bpm: features?.tempo ? Math.round(features.tempo) : 120,
+      energy: features?.energy !== undefined ? features.energy : 0.6,
+      popularity: t.popularity ?? 0,
+      danceability: features?.danceability !== undefined ? features.danceability : 0.5,
+      valence: features?.valence !== undefined ? features.valence : 0.5,
+      acousticness: features?.acousticness !== undefined ? features.acousticness : 0.2,
+      instrumentalness: features?.instrumentalness !== undefined ? features.instrumentalness : 0.1,
+      speechiness: features?.speechiness !== undefined ? features.speechiness : 0.05,
+      liveness: features?.liveness !== undefined ? features.liveness : 0.1,
+      loudness: features?.loudness !== undefined ? features.loudness : -6.0,
+      duration: formatDuration(t.duration_ms),
+      durationMs: t.duration_ms,
+    };
+  });
+}
+
+// --- Specific Spotify API Functions ---
+
+// 1. Current User Profile
+export async function getCurrentUser(): Promise<{ displayName: string; imageUrl: string; id: string }> {
+  const data = await spotifyFetch("/me");
+  return {
+    displayName: data.display_name,
+    imageUrl: data.images?.[0]?.url || "",
+    id: data.id,
+  };
+}
+
+// 2. Playlists (User's and followed ones) — fully paginated
+export async function getUserPlaylists(currentUserId: string): Promise<Playlist[]> {
+  return fetchAllPages<Playlist>(
+    "/me/playlists?limit=50",
+    (pl) => ({
+      id: pl.id,
+      name: pl.name || "Untitled Playlist",
+      desc: pl.description || "No description",
+      tracks: pl.tracks?.total ?? 0,
+      cover: pl.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
+      owner: pl.owner?.id === currentUserId ? "yours" : "followed",
+    }),
+    120 // 120ms between pages to stay safely under rate limits
+  );
+}
+
+// 3. Playlist Tracks or Liked Songs (single playlist, enriched)
+export async function getPlaylistTracks(playlistId: string | number, onProgress?: PlaylistProgressCallback): Promise<Track[]> {
+  const items = await getRawPlaylistTracks(playlistId, onProgress);
+  return await enrichTracks(items);
+}
+
+// 3a. Fetch raw (un-enriched) track items for a single playlist — fully paginated
+export async function getRawPlaylistTracks(playlistId: string | number, onProgress?: PlaylistProgressCallback): Promise<any[]> {
+  if (playlistId === "liked") {
+    const items = await fetchAllPages<any>(
+      "/me/tracks?limit=50",
+      (i) => ({ ...i.track, added_at: i.added_at }),
+      150,
+      onProgress
+    );
+    return items.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
+  } else {
+    const items = await fetchAllPages<any>(
+      `/playlists/${playlistId}/items?limit=50`,
+      (i) => {
+        if (!i.track) return null as any; // will be filtered below
+        return { ...i.track, added_at: i.added_at };
+      },
+      150,
+      onProgress
+    );
+    return items.filter(Boolean).map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` })); // remove null placeholders for deleted tracks
+  }
+}
+
+// 3b. Fetch multiple playlists sequentially and enrich all tracks in ONE pass
+export async function getMultiPlaylistTracks(playlistIds: (string | number)[], onProgress?: PlaylistProgressCallback): Promise<Track[]> {
+  const allRaw: any[] = [];
+  const seen = new Set<string>();
+  const playlistCount = Math.max(playlistIds.length, 1);
+
+  for (let i = 0; i < playlistIds.length; i++) {
+    try {
+      const items = await getRawPlaylistTracks(playlistIds[i], (playlistPercent) => {
+        if (onProgress) {
+          const overall = Math.min(100, Math.round(((i + playlistPercent / 100) / playlistCount) * 100));
+          onProgress(overall);
+        }
+      });
+      for (const item of items) {
+        if (item?.id && !seen.has(item.id)) {
+          seen.add(item.id);
+          allRaw.push(item);
+        }
+      }
+    } catch (err) {
+      console.warn(`Failed to load tracks for playlist ${playlistIds[i]}:`, err);
+    }
+    // Small pause between playlist fetches to avoid hammering the API
+    if (i < playlistIds.length - 1) await sleep(150);
+  }
+
+  if (onProgress) onProgress(100);
+  return await enrichTracks(allRaw);
+}
+
+// 4. Get Liked Songs count
+export async function getLikedSongsCount(): Promise<number> {
+  const data = await spotifyFetch("/me/tracks?limit=1");
+  return data.total || 0;
+}
+
+// 5. Recently Played Tracks
+export async function getRecentlyPlayed(): Promise<any[]> {
+  const data = await spotifyFetch("/me/player/recently-played?limit=6");
+  return data.items.map((item: any) => ({
+    title: item.track.name,
+    ago: formatRelativeTime(item.played_at),
+    cover: item.track.album.images?.[0]?.url || "bg-gradient-to-br from-blue-900 to-indigo-950",
+    uri: item.track.uri,
+  }));
+}
+
+// 6. Top Artists
+export async function getTopArtists(): Promise<Artist[]> {
+  const data = await spotifyFetch("/me/top/artists?limit=10");
+  return data.items
+    .map((artist: any) => ({
+      name: artist.name,
+      genre: artist.genres?.[0]?.toUpperCase() || "POP",
+      plays: String(Math.round(artist.popularity * 15)), // Mock plays based on popularity for UX consistency
+      cover: artist.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
+    }))
+    .sort((a: Artist, b: Artist) => {
+      const playsDiff = Number(b.plays) - Number(a.plays);
+      return playsDiff !== 0 ? playsDiff : a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    });
+}
+
+// 7. Search
+export async function searchSpotify(query: string): Promise<{
+  tracks: Track[];
+  artists: Artist[];
+  playlists: Playlist[];
+  albums: any[];
+}> {
+  const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track,artist,playlist,album&limit=12`);
+
+  // Map Spotify entities
+  const tracks = data.tracks?.items ? await enrichTracks(data.tracks.items) : [];
+
+  const artists = data.artists?.items?.map((a: any) => ({
+    name: a.name,
+    genre: a.genres?.[0]?.toUpperCase() || "GENRE",
+    plays: Math.round(a.popularity * 15),
+    cover: a.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
+  })) || [];
+
+  const playlists = data.playlists?.items?.map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    desc: p.description || "",
+    tracks: p.tracks.total,
+    cover: p.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
+    owner: "yours" as const, // Default search playlists as yours
+  })) || [];
+
+  const albums = data.albums?.items?.map((a: any) => ({
+    album: a.name,
+    artist: a.artists?.map((art: any) => art.name).join(", "),
+    releaseYear: a.release_date ? new Date(a.release_date).getFullYear() : 2024,
+    cover: a.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
+  })) || [];
+
+  return { tracks, artists, playlists, albums };
+}
+
+// 8. Player API
+export async function getPlayerState(): Promise<any> {
+  return await spotifyFetch("/me/player");
+}
+
+export async function playTrack(params: {
+  deviceId?: string;
+  contextUri?: string;
+  uris?: string[];
+  offset?: { position: number } | { uri: string };
+  positionMs?: number;
+}): Promise<void> {
+  const body: any = {};
+  if (params.contextUri) body.context_uri = params.contextUri;
+  if (params.uris) body.uris = params.uris;
+  if (params.offset) body.offset = params.offset;
+  if (params.positionMs) body.position_ms = params.positionMs;
+
+  const query = params.deviceId ? `?device_id=${params.deviceId}` : "";
+  await spotifyFetch(`/me/player/play${query}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function pauseTrack(deviceId?: string): Promise<void> {
+  const query = deviceId ? `?device_id=${deviceId}` : "";
+  await spotifyFetch(`/me/player/pause${query}`, { method: "PUT" });
+}
+
+export async function skipToNext(deviceId?: string): Promise<void> {
+  const query = deviceId ? `?device_id=${deviceId}` : "";
+  await spotifyFetch(`/me/player/next${query}`, { method: "POST" });
+}
+
+export async function skipToPrevious(deviceId?: string): Promise<void> {
+  const query = deviceId ? `?device_id=${deviceId}` : "";
+  await spotifyFetch(`/me/player/previous${query}`, { method: "POST" });
+}
+
+export async function setPlayerVolume(volumePercent: number, deviceId?: string): Promise<void> {
+  const queryParams = new URLSearchParams({ volume_percent: String(volumePercent) });
+  if (deviceId) queryParams.set("device_id", deviceId);
+  await spotifyFetch(`/me/player/volume?${queryParams.toString()}`, { method: "PUT" });
+}
+
+export async function seekPosition(positionMs: number, deviceId?: string): Promise<void> {
+  const queryParams = new URLSearchParams({ position_ms: String(positionMs) });
+  if (deviceId) queryParams.set("device_id", deviceId);
+  await spotifyFetch(`/me/player/seek?${queryParams.toString()}`, { method: "PUT" });
+}
+
+export async function toggleShuffle(state: boolean, deviceId?: string): Promise<void> {
+  const queryParams = new URLSearchParams({ state: String(state) });
+  if (deviceId) queryParams.set("device_id", deviceId);
+  await spotifyFetch(`/me/player/shuffle?${queryParams.toString()}`, { method: "PUT" });
+}
+
+export async function toggleRepeat(state: "track" | "context" | "off", deviceId?: string): Promise<void> {
+  const queryParams = new URLSearchParams({ state });
+  if (deviceId) queryParams.set("device_id", deviceId);
+  await spotifyFetch(`/me/player/repeat?${queryParams.toString()}`, { method: "PUT" });
+}
+
+// 9. Playlist Management
+export async function addTracksToPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
+  await spotifyFetch(`/playlists/${playlistId}/tracks`, {
+    method: "POST",
+    body: JSON.stringify({ uris: trackUris }),
+  });
+}
+
+export async function removeTracksFromPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
+  await spotifyFetch(`/playlists/${playlistId}/tracks`, {
+    method: "DELETE",
+    body: JSON.stringify({
+      tracks: trackUris.map(uri => ({ uri })),
+    }),
+  });
+}
+
+export async function getPlaylistSnapshotId(playlistId: string | number): Promise<string | null> {
+  if (playlistId === "liked") return null;
+
+  const data = await spotifyFetch(`/playlists/${playlistId}?fields=snapshot_id`);
+  return data?.snapshot_id ?? null;
+}
+
+export async function reorderPlaylistTracks(
+  playlistId: string | number,
+  desiredTrackIds: string[],
+  snapshotId: string | null = null
+): Promise<void> {
+  if (desiredTrackIds.length < 2) return;
+
+  const workingOrder = [...desiredTrackIds];
+  let currentSnapshotId = snapshotId;
+
+  for (let targetIndex = 0; targetIndex < desiredTrackIds.length; targetIndex++) {
+    const desiredTrackId = desiredTrackIds[targetIndex];
+    if (workingOrder[targetIndex] === desiredTrackId) continue;
+
+    const currentIndex = workingOrder.indexOf(desiredTrackId);
+    if (currentIndex === -1) continue;
+
+    const payload: Record<string, unknown> = {
+      range_start: currentIndex,
+      insert_before: targetIndex,
+      range_length: 1,
+    };
+
+    if (currentSnapshotId) {
+      payload.snapshot_id = currentSnapshotId;
+    }
+
+    const response = await spotifyFetch(`/playlists/${playlistId}/items`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+
+    if (response?.snapshot_id) {
+      currentSnapshotId = response.snapshot_id;
+    }
+
+    const [movedTrackId] = workingOrder.splice(currentIndex, 1);
+    workingOrder.splice(targetIndex, 0, movedTrackId);
+  }
+}
