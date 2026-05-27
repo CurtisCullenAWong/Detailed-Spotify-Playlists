@@ -9,6 +9,30 @@ const BASE_URL = "https://api.spotify.com/v1";
 // Controls whether the deprecated /audio-features and /artists (genre) calls are made.
 // Defaults to false (safe). Call setDeprecatedApisEnabled(true) to opt-in.
 let _deprecatedApisEnabled = false;
+let rateLimitResetTime = 0;
+
+async function checkRateLimit(signal?: AbortSignal | null): Promise<void> {
+  const now = Date.now();
+  if (now < rateLimitResetTime) {
+    const waitMs = rateLimitResetTime - now;
+    console.warn(`Rate limit active. Waiting ${waitMs}ms before sending request...`);
+    let timeoutId: any;
+    const sleepPromise = new Promise<void>((resolve, reject) => {
+      timeoutId = setTimeout(resolve, waitMs);
+      if (signal) {
+        signal.addEventListener("abort", () => {
+          clearTimeout(timeoutId);
+          reject(new DOMException("The user aborted a request.", "AbortError"));
+        });
+      }
+    });
+    try {
+      await sleepPromise;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 export function setDeprecatedApisEnabled(enabled: boolean): void {
   _deprecatedApisEnabled = enabled;
@@ -39,6 +63,11 @@ export async function spotifyFetch(path: string, options: RequestInit = {}): Pro
     throw new Error("No active Spotify session. Please log in.");
   }
 
+  await checkRateLimit(options.signal);
+  if (options.signal?.aborted) {
+    throw new DOMException("The user aborted a request.", "AbortError");
+  }
+
   const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
   const requestKey = buildRequestKey(url, options);
   const existingRequest = inFlightRequests.get(requestKey);
@@ -59,8 +88,25 @@ export async function spotifyFetch(path: string, options: RequestInit = {}): Pro
       for (let attempt = 0; attempt < 3 && response.status === 429; attempt++) {
         const retryAfter = parseInt(response.headers.get("Retry-After") || "2", 10);
         const waitMs = Math.max(retryAfter * 1000, 1000 * Math.pow(2, attempt));
+        rateLimitResetTime = Date.now() + waitMs;
         console.warn(`Rate limited by Spotify. Waiting ${waitMs}ms before retry (attempt ${attempt + 1})...`);
-        await sleep(waitMs);
+        
+        let timeoutId: any;
+        const retrySleep = new Promise<void>((resolve, reject) => {
+          timeoutId = setTimeout(resolve, waitMs);
+          if (options.signal) {
+            options.signal.addEventListener("abort", () => {
+              clearTimeout(timeoutId);
+              reject(new DOMException("The user aborted a request.", "AbortError"));
+            });
+          }
+        });
+        try {
+          await retrySleep;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+        
         response = await fetch(url, { ...options, headers });
       }
 
@@ -107,7 +153,9 @@ async function fetchAllPages<T>(
   firstPagePath: string,
   itemMapper: (item: any) => T,
   delayMs = 100,
-  onProgress?: PlaylistProgressCallback
+  onProgress?: PlaylistProgressCallback,
+  signal?: AbortSignal,
+  onChunk?: (items: T[]) => Promise<void> | void
 ): Promise<T[]> {
   const results: T[] = [];
   let nextUrl: string | null = firstPagePath.startsWith("http")
@@ -116,24 +164,49 @@ async function fetchAllPages<T>(
   let totalItems: number | null = null;
 
   while (nextUrl) {
-    const data = await spotifyFetch(nextUrl);
+    if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
+    const data = await spotifyFetch(nextUrl, { signal });
     if (!data?.items) break;
     totalItems = typeof data.total === "number" ? data.total : totalItems;
 
+    const chunkResults = [];
     for (const item of data.items) {
       if (item == null) continue; // skip nulls Spotify sends for deleted items
       try {
-        results.push(itemMapper(item));
+        const mapped = itemMapper(item);
+        results.push(mapped);
+        chunkResults.push(mapped);
       } catch (err) {
         console.warn("fetchAllPages: skipping malformed item from Spotify:", err, item);
       }
+    }
+
+    if (onChunk && chunkResults.length > 0) {
+      await onChunk(chunkResults);
     }
 
     nextUrl = data.next ?? null;
     if (onProgress && totalItems && totalItems > 0) {
       onProgress(Math.min(100, Math.round((results.length / totalItems) * 100)));
     }
-    if (nextUrl) await sleep(delayMs);
+    if (nextUrl) {
+      if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
+      let timeoutId: any;
+      const sleepPromise = new Promise<void>((resolve, reject) => {
+        timeoutId = setTimeout(resolve, delayMs);
+        if (signal) {
+          signal.addEventListener("abort", () => {
+            clearTimeout(timeoutId);
+            reject(new DOMException("The user aborted a request.", "AbortError"));
+          });
+        }
+      });
+      try {
+        await sleepPromise;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   if (onProgress) onProgress(100);
@@ -168,7 +241,7 @@ function formatDuration(ms: number): string {
 
 // --- Track Enrichment Helper (Batch fetch audio features & artist genres) ---
 
-export async function enrichTracks(tracks: any[]): Promise<Track[]> {
+export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise<Track[]> {
   if (tracks.length === 0) return [];
 
   const trackIds = tracks.map(t => t.id).filter(id => !!id);
@@ -178,16 +251,35 @@ export async function enrichTracks(tracks: any[]): Promise<Track[]> {
   const featuresMap = new Map<string, any>();
   if (_deprecatedApisEnabled) {
     for (let i = 0; i < trackIds.length; i += 50) {
+      if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
       const chunk = trackIds.slice(i, i + 50);
       try {
-        const data = await spotifyFetch(`/audio-features?ids=${chunk.join(",")}`);
+        const data = await spotifyFetch(`/audio-features?ids=${chunk.join(",")}`, { signal });
         data.audio_features?.forEach((f: any) => {
           if (f) featuresMap.set(f.id, f);
         });
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === "AbortError") throw err;
         console.warn("Failed to fetch audio features chunk:", err);
       }
-      if (i + 50 < trackIds.length) await sleep(200);
+      if (i + 50 < trackIds.length) {
+        if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
+        let timeoutId: any;
+        const sleepPromise = new Promise<void>((resolve, reject) => {
+          timeoutId = setTimeout(resolve, 200);
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              clearTimeout(timeoutId);
+              reject(new DOMException("The user aborted a request.", "AbortError"));
+            });
+          }
+        });
+        try {
+          await sleepPromise;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
     }
   }
 
@@ -195,18 +287,37 @@ export async function enrichTracks(tracks: any[]): Promise<Track[]> {
   const genresMap = new Map<string, string>();
   if (_deprecatedApisEnabled) {
     for (let i = 0; i < artistIds.length; i += 50) {
+      if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
       const chunk = artistIds.slice(i, i + 50);
       try {
-        const data = await spotifyFetch(`/artists?ids=${chunk.join(",")}`);
+        const data = await spotifyFetch(`/artists?ids=${chunk.join(",")}`, { signal });
         data.artists?.forEach((a: any) => {
           if (a && a.genres && a.genres.length > 0) {
             genresMap.set(a.id, a.genres[0]);
           }
         });
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === "AbortError") throw err;
         console.warn("Failed to fetch artists chunk:", err);
       }
-      if (i + 50 < artistIds.length) await sleep(100);
+      if (i + 50 < artistIds.length) {
+        if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
+        let timeoutId: any;
+        const sleepPromise = new Promise<void>((resolve, reject) => {
+          timeoutId = setTimeout(resolve, 100);
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              clearTimeout(timeoutId);
+              reject(new DOMException("The user aborted a request.", "AbortError"));
+            });
+          }
+        });
+        try {
+          await sleepPromise;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
     }
   }
 
@@ -270,22 +381,66 @@ export async function getUserPlaylists(currentUserId: string): Promise<Playlist[
 }
 
 // 3. Playlist Tracks or Liked Songs (single playlist, enriched)
-export async function getPlaylistTracks(playlistId: string | number, onProgress?: PlaylistProgressCallback): Promise<Track[]> {
-  const items = await getRawPlaylistTracks(playlistId, onProgress);
-  return await enrichTracks(items);
+export async function getPlaylistTracks(
+  playlistId: string | number,
+  onProgress?: PlaylistProgressCallback,
+  signal?: AbortSignal,
+  onStream?: (tracks: Track[]) => void
+): Promise<Track[]> {
+  const accumulated: Track[] = [];
+  const items = await getRawPlaylistTracks(playlistId, onProgress, signal, onStream ? async (chunk) => {
+    try {
+      const enriched = await enrichTracks(chunk, signal);
+      accumulated.push(...enriched);
+      onStream([...accumulated]);
+    } catch (e) {
+      console.warn("enriching chunk failed", e);
+    }
+  } : undefined);
+  
+  if (onStream) return accumulated;
+  return await enrichTracks(items, signal);
 }
 
 // 3a. Fetch raw (un-enriched) track items for a single playlist — fully paginated
-export async function getRawPlaylistTracks(playlistId: string | number, onProgress?: PlaylistProgressCallback): Promise<any[]> {
+export async function getRawPlaylistTracks(
+  playlistId: string | number,
+  onProgress?: PlaylistProgressCallback,
+  signal?: AbortSignal,
+  onChunk?: (items: any[]) => Promise<void> | void
+): Promise<any[]> {
   if (playlistId === "liked") {
+    let totalAdded = 0;
+    const seen = new Set<string>();
     const items = await fetchAllPages<any>(
       "/me/tracks?limit=50",
       (i) => ({ ...i.track, added_at: i.added_at }),
       150,
-      onProgress
+      onProgress,
+      signal,
+      onChunk ? async (chunk) => {
+        const uniqueItems = [];
+        for (const item of chunk) {
+          if (item?.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            uniqueItems.push({ ...item, rowKey: `${String(playlistId)}:${totalAdded++}` });
+          }
+        }
+        if (uniqueItems.length > 0) await onChunk(uniqueItems);
+      } : undefined
     );
-    return items.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
+    const retSeen = new Set<string>();
+    const uniqueItems: any[] = [];
+    for (const item of items) {
+      if (item?.id && !retSeen.has(item.id)) {
+        retSeen.add(item.id);
+        uniqueItems.push(item);
+      }
+    }
+    return uniqueItems.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
   } else {
+    let totalAdded = 0;
+    const seen = new Set<string>();
     const items = await fetchAllPages<any>(
       `/playlists/${playlistId}/items?limit=50`,
       (i) => {
@@ -293,41 +448,106 @@ export async function getRawPlaylistTracks(playlistId: string | number, onProgre
         return { ...i.track, added_at: i.added_at };
       },
       150,
-      onProgress
+      onProgress,
+      signal,
+      onChunk ? async (chunk) => {
+        const uniqueItems = [];
+        for (const item of chunk) {
+          if (item?.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            uniqueItems.push({ ...item, rowKey: `${String(playlistId)}:${totalAdded++}` });
+          }
+        }
+        if (uniqueItems.length > 0) await onChunk(uniqueItems);
+      } : undefined
     );
-    return items.filter(Boolean).map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` })); // remove null placeholders for deleted tracks
+    const retSeen = new Set<string>();
+    const uniqueItems: any[] = [];
+    for (const item of items) {
+      if (item?.id && !retSeen.has(item.id)) {
+        retSeen.add(item.id);
+        uniqueItems.push(item);
+      }
+    }
+    return uniqueItems.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
   }
 }
 
 // 3b. Fetch multiple playlists sequentially and enrich all tracks in ONE pass
-export async function getMultiPlaylistTracks(playlistIds: (string | number)[], onProgress?: PlaylistProgressCallback): Promise<Track[]> {
+export async function getMultiPlaylistTracks(
+  playlistIds: (string | number)[],
+  onProgress?: PlaylistProgressCallback,
+  signal?: AbortSignal,
+  onStream?: (tracks: Track[]) => void
+): Promise<Track[]> {
   const allRaw: any[] = [];
+  const allEnriched: Track[] = [];
   const seen = new Set<string>();
   const playlistCount = Math.max(playlistIds.length, 1);
 
   for (let i = 0; i < playlistIds.length; i++) {
+    if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
     try {
       const items = await getRawPlaylistTracks(playlistIds[i], (playlistPercent) => {
         if (onProgress) {
           const overall = Math.min(100, Math.round(((i + playlistPercent / 100) / playlistCount) * 100));
           onProgress(overall);
         }
-      });
-      for (const item of items) {
-        if (item?.id && !seen.has(item.id)) {
-          seen.add(item.id);
-          allRaw.push(item);
+      }, signal, onStream ? async (chunk) => {
+        const uniqueChunk = [];
+        for (const item of chunk) {
+          if (item?.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            uniqueChunk.push(item);
+          }
+        }
+        if (uniqueChunk.length > 0) {
+          try {
+            const enriched = await enrichTracks(uniqueChunk, signal);
+            allEnriched.push(...enriched);
+            onStream([...allEnriched]);
+          } catch (e) {
+            console.warn("enriching chunk failed", e);
+          }
+        }
+      } : undefined);
+      
+      if (!onStream) {
+        for (const item of items) {
+          if (item?.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            allRaw.push(item);
+          }
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === "AbortError") throw err;
       console.warn(`Failed to load tracks for playlist ${playlistIds[i]}:`, err);
     }
     // Small pause between playlist fetches to avoid hammering the API
-    if (i < playlistIds.length - 1) await sleep(150);
+    if (i < playlistIds.length - 1) {
+      if (signal?.aborted) throw new DOMException("The user aborted a request.", "AbortError");
+      let timeoutId: any;
+      const sleepPromise = new Promise<void>((resolve, reject) => {
+        timeoutId = setTimeout(resolve, 150);
+        if (signal) {
+          signal.addEventListener("abort", () => {
+            clearTimeout(timeoutId);
+            reject(new DOMException("The user aborted a request.", "AbortError"));
+          });
+        }
+      });
+      try {
+        await sleepPromise;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   if (onProgress) onProgress(100);
-  return await enrichTracks(allRaw);
+  if (onStream) return allEnriched;
+  return await enrichTracks(allRaw, signal);
 }
 
 // 4. Get Liked Songs count
@@ -402,6 +622,12 @@ export async function searchSpotify(query: string): Promise<{
 }
 
 // 8. Player API
+function notifyPlaybackChange(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("spotify-playback-trigger"));
+  }
+}
+
 export async function getPlayerState(): Promise<any> {
   return await spotifyFetch("/me/player");
 }
@@ -424,45 +650,53 @@ export async function playTrack(params: {
     method: "PUT",
     body: JSON.stringify(body),
   });
+  notifyPlaybackChange();
 }
 
 export async function pauseTrack(deviceId?: string): Promise<void> {
   const query = deviceId ? `?device_id=${deviceId}` : "";
   await spotifyFetch(`/me/player/pause${query}`, { method: "PUT" });
+  notifyPlaybackChange();
 }
 
 export async function skipToNext(deviceId?: string): Promise<void> {
   const query = deviceId ? `?device_id=${deviceId}` : "";
   await spotifyFetch(`/me/player/next${query}`, { method: "POST" });
+  notifyPlaybackChange();
 }
 
 export async function skipToPrevious(deviceId?: string): Promise<void> {
   const query = deviceId ? `?device_id=${deviceId}` : "";
   await spotifyFetch(`/me/player/previous${query}`, { method: "POST" });
+  notifyPlaybackChange();
 }
 
 export async function setPlayerVolume(volumePercent: number, deviceId?: string): Promise<void> {
   const queryParams = new URLSearchParams({ volume_percent: String(volumePercent) });
   if (deviceId) queryParams.set("device_id", deviceId);
   await spotifyFetch(`/me/player/volume?${queryParams.toString()}`, { method: "PUT" });
+  notifyPlaybackChange();
 }
 
 export async function seekPosition(positionMs: number, deviceId?: string): Promise<void> {
   const queryParams = new URLSearchParams({ position_ms: String(positionMs) });
   if (deviceId) queryParams.set("device_id", deviceId);
   await spotifyFetch(`/me/player/seek?${queryParams.toString()}`, { method: "PUT" });
+  notifyPlaybackChange();
 }
 
 export async function toggleShuffle(state: boolean, deviceId?: string): Promise<void> {
   const queryParams = new URLSearchParams({ state: String(state) });
   if (deviceId) queryParams.set("device_id", deviceId);
   await spotifyFetch(`/me/player/shuffle?${queryParams.toString()}`, { method: "PUT" });
+  notifyPlaybackChange();
 }
 
 export async function toggleRepeat(state: "track" | "context" | "off", deviceId?: string): Promise<void> {
   const queryParams = new URLSearchParams({ state });
   if (deviceId) queryParams.set("device_id", deviceId);
   await spotifyFetch(`/me/player/repeat?${queryParams.toString()}`, { method: "PUT" });
+  notifyPlaybackChange();
 }
 
 // 9. Playlist Management
@@ -491,12 +725,13 @@ export async function getPlaylistSnapshotId(playlistId: string | number): Promis
 
 export async function reorderPlaylistTracks(
   playlistId: string | number,
+  initialTrackIds: string[],
   desiredTrackIds: string[],
   snapshotId: string | null = null
 ): Promise<void> {
   if (desiredTrackIds.length < 2) return;
 
-  const workingOrder = [...desiredTrackIds];
+  const workingOrder = [...initialTrackIds];
   let currentSnapshotId = snapshotId;
 
   for (let targetIndex = 0; targetIndex < desiredTrackIds.length; targetIndex++) {

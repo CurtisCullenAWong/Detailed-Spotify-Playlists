@@ -35,6 +35,7 @@ export interface UserPreferences {
 
   // Feature flags
   enableDeprecatedApis: boolean; // Audio-features & artist-genre enrichment (deprecated Spotify endpoints)
+  selectedPlaylistId: string | number | null;
 }
 
 const STORAGE_KEY = "spotify-manager-preferences";
@@ -69,6 +70,7 @@ const defaultPreferences: UserPreferences = {
 
   // Feature flags — deprecated endpoints off by default for safety
   enableDeprecatedApis: false,
+  selectedPlaylistId: null,
 };
 
 // Load preferences from localStorage
@@ -182,4 +184,7 @@ export const PreferenceUpdaters = {
 
   setEnableDeprecatedApis: (enabled: boolean) =>
     updatePreference("enableDeprecatedApis", enabled),
+  
+  setSelectedPlaylistId: (id: string | number | null) =>
+    updatePreference("selectedPlaylistId", id),
 };

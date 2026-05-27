@@ -37,26 +37,20 @@ import {
   LogOut,
 } from "lucide-react";
 
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 
 // Import data from centralized data directory
 import {
   TRACKS as STATIC_TRACKS,
-  PLAYLISTS as STATIC_PLAYLISTS,
-  LIKED_SONGS_COUNT as STATIC_LIKED_SONGS_COUNT,
-  TOP_ARTISTS as STATIC_TOP_ARTISTS,
-  RECENTLY_PLAYED as STATIC_RECENTLY_PLAYED,
   API_SECTIONS,
   BROWSE_CATEGORIES,
   ALL_COLUMNS,
   GROUP_BY_LABELS,
   SEARCH_FILTERS,
-  KEY_DATA_INDICATORS,
-  ALL_ARTISTS as STATIC_ALL_ARTISTS,
 } from "../data";
 import type { Track, Playlist, Artist, GroupByOption, ApiEndpoint } from "../data";
 import { loadPreferences, savePreferences, PreferenceUpdaters } from "../utils/userPreferences";
-import { isAuthenticatedSync, handleRedirectCallback, logout, login } from "../utils/spotifyAuth";
+import { isAuthenticatedSync, logout, handleRedirectCallback } from "../utils/spotifyAuth";
 import {
   getCurrentUser,
   getUserPlaylists,
@@ -92,6 +86,26 @@ const getInitials = (name: string) => {
   return name.substring(0, 2).toUpperCase();
 };
 
+const buildTrackUri = (trackId: string | number) => `spotify:track:${trackId}`;
+
+const getPlaybackTrackId = (item: any): string | null => {
+  if (!item) return null;
+  if (item.id !== undefined && item.id !== null) return String(item.id);
+  if (typeof item.uri === "string") {
+    const uriParts = item.uri.split(":");
+    return uriParts[uriParts.length - 1] || null;
+  }
+  return null;
+};
+
+const playTrackSequence = async (tracks: Pick<Track, "id">[], startIndex: number): Promise<void> => {
+  if (tracks.length === 0 || startIndex < 0 || startIndex >= tracks.length) return;
+  await playTrack({
+    uris: tracks.map(track => buildTrackUri(track.id)),
+    offset: { position: startIndex },
+  });
+};
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -124,7 +138,6 @@ function Sidebar({
   likedSongsCount,
   selectedPlaylistId,
   setSelectedPlaylistId,
-  currentUser,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -170,8 +183,8 @@ function Sidebar({
   if (collapsed) {
     return (
       <aside className="hidden md:flex flex-col h-full w-[60px] shrink-0 bg-[#000000] select-none items-center py-4 gap-2 overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
-        <button onClick={onToggleCollapse} className="w-9 h-9 flex items-center justify-center rounded-full bg-[#1DB954] mb-2 shrink-0 hover:scale-105 transition-transform">
-          <Music2 size={16} className="text-black" />
+        <button onClick={onToggleCollapse} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.06] border border-white/10 mb-2 shrink-0 hover:scale-105 transition-all overflow-hidden">
+          <img src="/favicon.png" alt="Logo" className="w-5 h-5 object-contain" />
         </button>
         {NAV.map(({ icon: Icon, label, id }) => (
           <button key={label} onClick={() => setPage(id)} title={label}
@@ -244,8 +257,8 @@ function Sidebar({
       {/* Brand */}
       <div className="px-6 pt-6 pb-4">
         <div className="flex items-center gap-2">
-          <button onClick={onToggleCollapse} className="w-8 h-8 rounded-full bg-[#1DB954] flex items-center justify-center shrink-0 hover:scale-105 transition-transform">
-            <Music2 size={16} className="text-black" />
+          <button onClick={onToggleCollapse} className="w-8 h-8 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center shrink-0 hover:scale-105 transition-all overflow-hidden">
+            <img src="/favicon.png" alt="Logo" className="w-4 h-4 object-contain" />
           </button>
           <span className="text-white font-bold text-[15px] tracking-tight">Spotify Manager</span>
           <button onClick={onToggleCollapse} className="ml-auto text-[#B3B3B3] hover:text-white transition-colors p-1 rounded hover:bg-[#282828]">
@@ -333,7 +346,6 @@ function Dashboard({
   likedSongsCount,
   recentlyPlayed,
   topArtists,
-  selectedPlaylistId,
   setSelectedPlaylistId,
   playbackState,
   enableDeprecatedApis,
@@ -385,6 +397,9 @@ function Dashboard({
     { label: "Active Device", value: activeDevice, sub: playbackState?.device?.type || "No active device", color: activeDevice !== "None" ? "text-emerald-400" : "text-[#B3B3B3]" },
     { label: "Playback Status", value: playbackState?.is_playing ? "Playing" : "Stopped", sub: playbackState?.item ? playbackState.item.name : "No active track", color: playbackState?.is_playing ? "text-amber-400" : "text-[#B3B3B3]" },
   ];
+  const recentlyPlayedTracks = recentlyPlayed
+    .map(item => STATIC_TRACKS.find(track => track.title.toLowerCase() === item.title.toLowerCase() && track.artist.toLowerCase() === item.artist.toLowerCase()))
+    .filter((track): track is Track => Boolean(track));
 
   return (
     <div className="flex-1 overflow-y-auto bg-gradient-to-b from-[#1a1a2e] via-[#121212] to-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -407,11 +422,10 @@ function Dashboard({
             title={enableDeprecatedApis
               ? "Audio features & genre enrichment ON (deprecated Spotify endpoints active)"
               : "Audio features & genre enrichment OFF (safe mode — deprecated endpoints skipped)"}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all duration-200 cursor-pointer select-none ${
-              enableDeprecatedApis
-                ? "bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25"
-                : "bg-[#282828] border-[#383838] text-[#535353] hover:border-[#535353] hover:text-[#B3B3B3]"
-            }`}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all duration-200 cursor-pointer select-none ${enableDeprecatedApis
+              ? "bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25"
+              : "bg-[#282828] border-[#383838] text-[#535353] hover:border-[#535353] hover:text-[#B3B3B3]"
+              }`}
           >
             <span className={`w-2 h-2 rounded-full transition-colors ${enableDeprecatedApis ? "bg-amber-400" : "bg-[#535353]"}`} />
             <span className="hidden sm:inline">{enableDeprecatedApis ? "Audio Features ON" : "Audio Features OFF"}</span>
@@ -470,7 +484,12 @@ function Dashboard({
               {recentlyPlayed.map((item, i) => (
                 <button
                   key={i}
-                  onClick={() => playTrack({ uris: [item.uri] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                  onClick={() => {
+                    const startIndex = recentlyPlayedTracks.findIndex(track => track.title === item.title && track.artist === item.artist);
+                    if (startIndex >= 0) {
+                      playTrackSequence(recentlyPlayedTracks, startIndex).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"));
+                    }
+                  }}
                   className="group flex items-center gap-3 bg-[#181818] hover:bg-[#282828] rounded-md overflow-hidden pr-3 transition-all text-left cursor-pointer"
                 >
                   <div className="w-14 h-14 shrink-0 flex items-center justify-center bg-[#282828]">
@@ -708,13 +727,13 @@ const writeWorkspaceTrackCache = (cache: WorkspaceTrackCache) => {
 function Workspace({
   playlists,
   selectedPlaylistId,
-  setSelectedPlaylistId,
   playlistTracks,
   loadingTracks,
   loadingTracksProgress,
   setPlaylistTracks,
-  likedSongsCount,
   setLikedSongsCount,
+  currentPlaybackTrackId,
+  enableDeprecatedApis,
 }: {
   playlists: Playlist[];
   selectedPlaylistId: string | number;
@@ -725,6 +744,8 @@ function Workspace({
   setPlaylistTracks: React.Dispatch<React.SetStateAction<Track[]>>;
   likedSongsCount: number;
   setLikedSongsCount: React.Dispatch<React.SetStateAction<number>>;
+  currentPlaybackTrackId: string | null;
+  enableDeprecatedApis: boolean;
 }) {
   const preferences = loadPreferences();
 
@@ -750,35 +771,100 @@ function Workspace({
   const dragColRef = useRef<ColId | null>(null);
   const dragOverColRef = useRef<ColId | null>(null);
 
+  const DEPRECATED_COLUMNS = React.useMemo(() => new Set<ColId>([
+    "genre", "bpm", "energy", "danceability", "valence",
+    "acousticness", "instrumentalness", "speechiness", "liveness", "loudness"
+  ]), []);
+
+  const activeColumnsCount = React.useMemo(() => {
+    return columnOrder
+      .filter(id => visibleCols.has(id))
+      .filter(id => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(id)).length;
+  }, [columnOrder, visibleCols, enableDeprecatedApis, DEPRECATED_COLUMNS]);
+
+  const totalColSpan = 2 + activeColumnsCount;
+
+  useEffect(() => {
+    if (!enableDeprecatedApis) {
+      if (sortKey && DEPRECATED_COLUMNS.has(sortKey as ColId)) {
+        setSortKey(null);
+      }
+      if (groupBy === "genre") {
+        setGroupBy("none");
+      }
+    }
+  }, [enableDeprecatedApis, sortKey, groupBy, DEPRECATED_COLUMNS]);
+
   const activePlaylist = playlists.find(p => p.id === selectedPlaylistId);
   const currentPlaylistKey = String(selectedPlaylistId);
-  const playlistName = 
+  const playlistName =
     selectedPlaylistId === "liked" ? "Liked Songs" :
-    selectedPlaylistId === "all_my" ? "All My Songs" :
-    selectedPlaylistId === "all_followed" ? "All Followed Songs" :
-    selectedPlaylistId === "all_songs" ? "All Songs" :
-    activePlaylist?.name || "Playlist View";
-  const playlistDesc = 
+      selectedPlaylistId === "all_my" ? "All My Songs" :
+        selectedPlaylistId === "all_followed" ? "All Followed Songs" :
+          selectedPlaylistId === "all_songs" ? "All Songs" :
+            activePlaylist?.name || "Playlist View";
+  const playlistDesc =
     selectedPlaylistId === "liked" ? "Your personal favorite tracks synced from Spotify" :
-    selectedPlaylistId === "all_my" ? "Compiled list of all your liked songs and personal playlists" :
-    selectedPlaylistId === "all_followed" ? "Compiled list of all tracks from playlists you follow" :
-    selectedPlaylistId === "all_songs" ? "Every track in your library compiled into one virtual playlist" :
-    activePlaylist?.desc || "Compiled track analysis and filtering criteria";
-  const playlistCover = 
-    selectedPlaylistId === "liked" ? "" : 
-    selectedPlaylistId === "all_my" ? "bg-gradient-to-br from-blue-600 to-indigo-700" :
-    selectedPlaylistId === "all_followed" ? "bg-gradient-to-br from-purple-600 to-violet-700" :
-    selectedPlaylistId === "all_songs" ? "bg-gradient-to-br from-emerald-600 to-teal-700" :
-    activePlaylist?.cover || "";
+      selectedPlaylistId === "all_my" ? "Compiled list of all your liked songs and personal playlists" :
+        selectedPlaylistId === "all_followed" ? "Compiled list of all tracks from playlists you follow" :
+          selectedPlaylistId === "all_songs" ? "Every track in your library compiled into one virtual playlist" :
+            activePlaylist?.desc || "Compiled track analysis and filtering criteria";
+  const playlistCover =
+    selectedPlaylistId === "liked" ? "" :
+      selectedPlaylistId === "all_my" ? "bg-gradient-to-br from-blue-600 to-indigo-700" :
+        selectedPlaylistId === "all_followed" ? "bg-gradient-to-br from-purple-600 to-violet-700" :
+          selectedPlaylistId === "all_songs" ? "bg-gradient-to-br from-emerald-600 to-teal-700" :
+            activePlaylist?.cover || "";
   const isYours = (selectedPlaylistId === "liked" || activePlaylist?.owner === "yours") && selectedPlaylistId !== "all_my" && selectedPlaylistId !== "all_followed" && selectedPlaylistId !== "all_songs";
   const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
   const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
   const currentTrackOrder = trackOrders[currentPlaylistKey] ?? [];
-  const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
-  const hasUnsavedTrackOrder = canSortPlaylist && playlistTracks.length > 0 && currentTrackOrder.length > 0 && !sameTrackOrder(currentTrackOrder, initialTrackOrder);
   const orderedPlaylistTracks = canReorderTracks && currentTrackOrder.length > 0
     ? applyTrackOrder(playlistTracks, currentTrackOrder)
     : playlistTracks;
+
+  const trackIndices = React.useMemo(() => {
+    const map = new Map<Track, number>();
+    orderedPlaylistTracks.forEach((t, i) => {
+      map.set(t, i);
+    });
+    return map;
+  }, [orderedPlaylistTracks]);
+
+  const sortedPlaylistTracks = React.useMemo(() => {
+    if (!sortKey) {
+      return orderedPlaylistTracks;
+    }
+    return [...playlistTracks].sort((a, b) => {
+      const va = a[sortKey as keyof Track];
+      const vb = b[sortKey as keyof Track];
+
+      if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
+      if (va === undefined || va === null) return 1;
+      if (vb === undefined || vb === null) return -1;
+
+      let cmp = 0;
+      if (sortKey === "duration") {
+        cmp = a.durationMs - b.durationMs;
+      } else if (typeof va === "number" && typeof vb === "number") {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+      }
+
+      if (cmp === 0) {
+        const idxA = trackIndices.get(a) ?? 0;
+        const idxB = trackIndices.get(b) ?? 0;
+        return idxA - idxB;
+      }
+
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, trackIndices]);
+
+  const targetTrackOrder = sortedPlaylistTracks.map(getTrackOrderKey);
+  const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
+  const hasUnsavedTrackOrder = canSortPlaylist && playlistTracks.length > 0 && !sameTrackOrder(targetTrackOrder, initialTrackOrder);
 
   // Reset visible row count whenever playlist or sort changes
   useEffect(() => {
@@ -855,47 +941,85 @@ function Workspace({
     dragOverColRef.current = null;
   };
 
-  const filtered = orderedPlaylistTracks.filter((t) => {
-    if (!t) return false;
-    const q = search.toLowerCase();
-    const title = (t.title || "").toLowerCase();
-    const artist = (t.artist || "").toLowerCase();
-    const album = (t.album || "").toLowerCase();
-    const genre = (t.genre || "").toLowerCase();
-    return title.includes(q) || artist.includes(q) || album.includes(q) || genre.includes(q);
-  });
+  const filtered = React.useMemo(() => {
+    return orderedPlaylistTracks.filter((t) => {
+      if (!t) return false;
+      const q = search.toLowerCase();
+      const title = (t.title || "").toLowerCase();
+      const artist = (t.artist || "").toLowerCase();
+      const album = (t.album || "").toLowerCase();
+      const genre = (t.genre || "").toLowerCase();
+      return title.includes(q) || artist.includes(q) || album.includes(q) || genre.includes(q);
+    });
+  }, [orderedPlaylistTracks, search]);
 
-  const sorted = [...filtered].sort((a, b) => {
-    if (!sortKey) return 0;
-    const va = a[sortKey as keyof Track];
-    const vb = b[sortKey as keyof Track];
+  const sorted = React.useMemo(() => {
+    if (!sortKey) return filtered;
+    return [...filtered].sort((a, b) => {
+      const va = a[sortKey as keyof Track];
+      const vb = b[sortKey as keyof Track];
 
-    if (va === undefined || va === null) return 1;
-    if (vb === undefined || vb === null) return -1;
+      if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
+      if (va === undefined || va === null) return 1;
+      if (vb === undefined || vb === null) return -1;
 
-    let cmp = 0;
-    if (sortKey === "duration") {
-      cmp = a.durationMs - b.durationMs;
-    } else if (typeof va === "number" && typeof vb === "number") {
-      cmp = va - vb;
-    } else {
-      cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
-    }
-    return sortDir === "asc" ? cmp : -cmp;
-  });
+      let cmp = 0;
+      if (sortKey === "duration") {
+        cmp = a.durationMs - b.durationMs;
+      } else if (typeof va === "number" && typeof vb === "number") {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+      }
+
+      if (cmp === 0) {
+        const idxA = trackIndices.get(a) ?? 0;
+        const idxB = trackIndices.get(b) ?? 0;
+        return idxA - idxB;
+      }
+
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [filtered, sortKey, sortDir, trackIndices]);
 
   const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else { setSortKey(key); setSortDir("asc"); }
+    if (!key) return;
+    if (sortKey === key) {
+      if (sortDir === "asc") {
+        setSortDir("desc");
+      } else {
+        setSortKey(null);
+      }
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   };
 
   const handleSavePlaylistOrder = async () => {
-    if (!canSortPlaylist || !hasUnsavedTrackOrder || currentTrackOrder.length === 0) return;
+    if (!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0) return;
 
     try {
       const snapshotId = await getPlaylistSnapshotId(selectedPlaylistId);
-      await reorderPlaylistTracks(selectedPlaylistId, currentTrackOrder, snapshotId);
-      setPlaylistTracks(prev => applyTrackOrder(prev, currentTrackOrder));
+      await reorderPlaylistTracks(selectedPlaylistId, initialTrackOrder, targetTrackOrder, snapshotId);
+
+      // Update playlistTracks locally to match the new saved order
+      setPlaylistTracks(prev => {
+        const trackMap = new Map(prev.map(t => [getTrackOrderKey(t), t] as const));
+        return targetTrackOrder.map(id => trackMap.get(id)).filter(Boolean) as Track[];
+      });
+
+      // Also update trackOrders to match the new order (so that sameTrackOrder will be true and save button disables)
+      setTrackOrders(prev => ({
+        ...prev,
+        [currentPlaylistKey]: targetTrackOrder,
+      }));
+
+      // If we sorted by column, we should clear the column sort so the visual layout matches the new default order
+      if (sortKey !== null) {
+        setSortKey(null);
+      }
+
       toast.success("Playlist sequence saved to Spotify.");
     } catch (err) {
       console.error(err);
@@ -1023,7 +1147,7 @@ function Workspace({
         onClick={() => toggleSort(col as SortKey)}
         className="flex items-center gap-1 text-left"
       >
-        {col === "energy" ? "ENERGY (API)" : col === "bpm" ? "BPM (API)" : label}
+        {col === "energy" ? "Energy" : col === "bpm" ? "BPM" : label}
         {sortKey === col
           ? sortDir === "asc" ? <ChevronDown size={11} className="text-[#1DB954] rotate-180" /> : <ChevronDown size={11} className="text-[#1DB954]" />
           : <ChevronDown size={11} className="opacity-0 group-hover:opacity-40 transition-opacity" />}
@@ -1066,18 +1190,18 @@ function Workspace({
             <h1 className="text-white text-[20px] md:text-[32px] font-extrabold leading-none mb-2 md:mb-3 truncate">{playlistName}</h1>
             <p className="text-[#B3B3B3] text-[12px] md:text-[13px] mb-2 md:mb-3 hidden sm:block">{playlistDesc}</p>
             <div className="flex items-center gap-2 md:gap-4 text-[11px] md:text-[13px] flex-wrap">
-              <span className="text-white font-semibold">{playlistTracks.length} tracks</span>
-              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
-              <div className="flex items-center gap-1.5">
-                <RefreshCw size={12} className="text-[#1DB954]" />
-                <span className="text-[#1DB954] font-semibold">Synced Live</span>
-              </div>
+              <span className="text-white font-semibold flex items-center gap-2">
+                {playlistTracks.length} tracks
+                {loadingTracks && (
+                  <div className="w-3 h-3 rounded-full border-2 border-[#1DB954] border-t-transparent animate-spin" title="Fetching tracks..."></div>
+                )}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2 md:gap-3 shrink-0">
             <button
               onClick={handleSavePlaylistOrder}
-              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || currentTrackOrder.length === 0}
+              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0}
               title={!canSortPlaylist
                 ? "Only playlists you own can be saved back to Spotify"
                 : !hasUnsavedTrackOrder
@@ -1091,7 +1215,7 @@ function Workspace({
             <button
               onClick={() => {
                 if (playlistTracks.length > 0) {
-                  playTrack({ uris: playlistTracks.map(t => `spotify:track:${t.id}`) })
+                  playTrackSequence(sorted, 0)
                     .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
                 }
               }}
@@ -1120,13 +1244,15 @@ function Workspace({
           </button>
           {groupByOpen && (
             <div className="absolute top-full left-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
-              {(Object.entries(GROUP_BY_LABELS) as [GroupBy, string][]).map(([opt, label]) => (
-                <button key={opt} onClick={() => { setGroupBy(opt); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                  className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === opt ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
-                  {label}
-                  {groupBy === opt && <Check size={12} />}
-                </button>
-              ))}
+              {(Object.entries(GROUP_BY_LABELS) as [GroupBy, string][])
+                .filter(([opt]) => enableDeprecatedApis || opt !== "genre")
+                .map(([opt, label]) => (
+                  <button key={opt} onClick={() => { setGroupBy(opt); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === opt ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+                    {label}
+                    {groupBy === opt && <Check size={12} />}
+                  </button>
+                ))}
             </div>
           )}
         </div>
@@ -1146,11 +1272,11 @@ function Workspace({
                   <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Toggle Columns</p>
                 </div>
                 <div className="max-h-60 overflow-y-auto py-1">
-                  {ALL_COLUMNS.map(col => (
-                    <button key={col.id} onClick={() => toggleColVisibility(col.id)}
+                  {ALL_COLUMNS.filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId)).map(col => (
+                    <button key={col.id} onClick={() => toggleColVisibility(col.id as ColId)}
                       className="w-full flex items-center justify-between px-4 py-2 text-[13px] hover:bg-[#383838] transition-colors cursor-pointer text-left">
-                      <span className={visibleCols.has(col.id) ? "text-white" : "text-[#535353]"}>{col.label}</span>
-                      {visibleCols.has(col.id) && <Check size={12} className="text-[#1DB954]" />}
+                      <span className={visibleCols.has(col.id as ColId) ? "text-white" : "text-[#535353]"}>{col.label}</span>
+                      {visibleCols.has(col.id as ColId) && <Check size={12} className="text-[#1DB954]" />}
                     </button>
                   ))}
                 </div>
@@ -1215,9 +1341,8 @@ function Workspace({
         {loadingTracks ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center px-6 bg-[#121212]/80 backdrop-blur-sm">
             <div className="flex flex-col items-center text-center w-full max-w-sm">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-t-transparent border-[#1DB954] mb-3" />
               <p className="text-[#B3B3B3] text-sm font-semibold">Fetching tracks & metadata from Spotify...</p>
-              <p className="text-[#535353] text-xs mt-1">Analyzing audio features (BPM, Energy) and artist genres</p>
+              <p className="text-[#535353] text-xs mt-1">Loading your playlist's metadata and tracks...</p>
               <div className="mt-4 w-full rounded-full bg-[#1a1a1a] border border-[#282828] p-1">
                 <div className="h-2 rounded-full bg-gradient-to-r from-[#1DB954] via-[#29d97f] to-[#7CFFB2] transition-all duration-300 ease-out" style={{ width: `${Math.max(4, loadingTracksProgress)}%` }} />
               </div>
@@ -1226,321 +1351,325 @@ function Workspace({
           </div>
         ) : null}
         <div className={`h-full overflow-auto ${loadingTracks ? "opacity-0 pointer-events-none" : ""}`}>
-        <table className="w-full min-w-[860px] border-collapse">
-          <thead className="sticky top-0 z-10 bg-[#121212]">
-            <tr className="border-b border-[#282828]">
-              <th className="w-10 px-4 py-3 text-left">
-                <button onClick={toggleAll}
-                  className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${selected.size === sorted.length && sorted.length > 0 ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"}`}>
-                  {selected.size === sorted.length && sorted.length > 0 && <Check size={10} className="text-black" />}
-                </button>
-              </th>
-              <th className="w-8 px-2 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">#</th>
-              {columnOrder.filter(id => visibleCols.has(id)).map(id => {
-                const col = ALL_COLUMNS.find(c => c.id === id)!;
-                return <ColHeader key={id} col={id} label={col.label} />;
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.length === 0 ? (
-              <tr>
-                <td colSpan={12} className="text-center py-20 text-[#535353] text-sm">
-                  No tracks found in this playlist.
-                </td>
+          <table className="w-full min-w-[860px] border-collapse">
+            <thead className="sticky top-0 z-10 bg-[#121212]">
+              <tr className="border-b border-[#282828]">
+                <th className="w-10 px-4 py-3 text-left">
+                  <button onClick={toggleAll}
+                    className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${selected.size === sorted.length && sorted.length > 0 ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"}`}>
+                    {selected.size === sorted.length && sorted.length > 0 && <Check size={10} className="text-black" />}
+                  </button>
+                </th>
+                <th className="w-8 px-2 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">#</th>
+                {columnOrder
+                  .filter(id => visibleCols.has(id))
+                  .filter(id => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(id))
+                  .map(id => {
+                    const col = ALL_COLUMNS.find(c => c.id === id)!;
+                    return <ColHeader key={id} col={id} label={col.label} />;
+                  })}
               </tr>
-            ) : (() => {
-              // Lazy rendering: accumulate rows until we hit visibleRowCount
-              let renderedCount = 0;
-              const rows = groupedEntries.map(({ label, tracks }, gi) => {
-                const isCollapsed = collapsedGroups.has(label);
+            </thead>
+            <tbody>
+              {sorted.length === 0 ? (
+                <tr>
+                  <td colSpan={totalColSpan} className="text-center py-20 text-[#535353] text-sm">
+                    No tracks found in this playlist.
+                  </td>
+                </tr>
+              ) : (() => {
+                // Lazy rendering: accumulate rows until we hit visibleRowCount
+                let renderedCount = 0;
+                const rows = groupedEntries.map(({ label, tracks }, gi) => {
+                  const isCollapsed = collapsedGroups.has(label);
+                  return (
+                    <React.Fragment key={`group-${gi}-${label}`}>
+                      {groupBy !== "none" && (
+                        <tr className="bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e]" onClick={() => toggleGroup(label)}>
+                          <td colSpan={totalColSpan} className="px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              {isCollapsed
+                                ? <ChevronRight size={14} className="text-[#B3B3B3]" />
+                                : <ChevronDown size={14} className="text-[#B3B3B3]" />}
+                              <span className="text-[#B3B3B3] text-[12px] font-semibold">
+                                {GROUP_BY_LABELS[groupBy as GroupByOption]}: <span className="text-white">{label}</span>
+                                <span className="ml-2 text-[#535353]">({tracks.length} tracks)</span>
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {!isCollapsed && (() => {
+                        const limit = Math.max(0, visibleRowCount - renderedCount);
+                        const visibleTracks = tracks.slice(0, limit);
+                        renderedCount += visibleTracks.length;
+                        return visibleTracks.map((track, i) => {
+                          const isSelected = selected.has(track.id);
+                          const trackKey = getTrackOrderKey(track);
+                          const trackImage = track.cover;
+                          const isPlayingTrack = currentPlaybackTrackId === String(track.id);
+                          return (
+                            <tr
+                              key={trackKey}
+                              draggable={canReorderTracks}
+                              onDragStart={() => handleTrackDragStart(trackKey)}
+                              onDragEnter={() => handleTrackDragEnter(trackKey)}
+                              onDragEnd={handleTrackDragEnd}
+                              onDragOver={(e) => e.preventDefault()}
+                              className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
+                                }`}
+                              onClick={() => toggleRow(track.id)}
+                            >
+                              <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => toggleRow(track.id)}
+                                  className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
+                                    }`}
+                                >
+                                  {isSelected && <Check size={10} className="text-black" />}
+                                </button>
+                              </td>
+                              <td className="px-2 py-2.5">
+                                <span className={`text-[12px] font-mono group-hover:hidden ${isPlayingTrack ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>
+                                  {isPlayingTrack ? "Playing" : i + 1}
+                                </span>
+                                <Play
+                                  size={12}
+                                  className="text-white fill-white hidden group-hover:block cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    playTrackSequence(sorted, sorted.findIndex(sortedTrack => String(sortedTrack.id) === String(track.id))).catch(() =>
+                                      toast.error("Could not play track. Is Spotify open on an active device?")
+                                    );
+                                  }}
+                                />
+                              </td>
+                              {columnOrder
+                                .filter((colId) => visibleCols.has(colId))
+                                .filter((colId) => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(colId))
+                                .map((colId) => {
+                                  if (colId === "title") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-3">
+                                          <div className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
+                                            {trackImage ? (
+                                              <ImageWithFallback src={trackImage} alt="" className="w-full h-full object-cover" />
+                                            ) : (
+                                              <Music2 size={14} className="text-[#B3B3B3]" />
+                                            )}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="text-white text-[13px] font-semibold truncate max-w-[180px]">
+                                              {track.title}
+                                            </p>
+                                            <p className="text-[#B3B3B3] text-[11px] truncate max-w-[180px]">
+                                              {track.artist}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "artist") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[13px] truncate max-w-[140px]">
+                                        {track.artist}
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "album") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[13px] truncate max-w-[140px]">
+                                        <AlbumCell album={track.album} />
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "genre") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                          {track.genre}
+                                        </span>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "releaseYear") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                        {track.releaseYear}
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "dateAdded") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                        {track.dateAdded}
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "bpm") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                        {track.bpm}
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "popularity") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-[#1DB954] h-full" style={{ width: `${Math.min(100, Math.max(0, track.popularity))}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[12px] font-mono w-8 text-right">
+                                            {Math.round(track.popularity)}
+                                          </span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "energy") {
+                                    const energyPct = Math.round(track.energy * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-[#1DB954] h-full" style={{ width: `${energyPct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{energyPct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "danceability") {
+                                    const val = track.danceability !== undefined ? track.danceability : 0.5;
+                                    const pct = Math.round(val * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-purple-500 h-full" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "valence") {
+                                    const val = track.valence !== undefined ? track.valence : 0.5;
+                                    const pct = Math.round(val * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-amber-500 h-full" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "acousticness") {
+                                    const val = track.acousticness !== undefined ? track.acousticness : 0.2;
+                                    const pct = Math.round(val * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-cyan-500 h-full" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "instrumentalness") {
+                                    const val = track.instrumentalness !== undefined ? track.instrumentalness : 0.1;
+                                    const pct = Math.round(val * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-pink-500 h-full" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "speechiness") {
+                                    const val = track.speechiness !== undefined ? track.speechiness : 0.05;
+                                    const pct = Math.round(val * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-indigo-500 h-full" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "liveness") {
+                                    const val = track.liveness !== undefined ? track.liveness : 0.1;
+                                    const pct = Math.round(val * 100);
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
+                                            <div className="bg-emerald-500 h-full" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "loudness") {
+                                    const val = track.loudness !== undefined ? track.loudness : -6.0;
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                        {val.toFixed(1)} dB
+                                      </td>
+                                    );
+                                  }
+                                  if (colId === "duration") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                        {track.duration}
+                                      </td>
+                                    );
+                                  }
+                                  return null;
+                                })}
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </React.Fragment>
+                  );
+                });
+                // Count total rendered rows to detect if sentinel is needed
+                let totalVisible = 0;
+                for (const { label, tracks } of groupedEntries) {
+                  if (!collapsedGroups.has(label)) totalVisible += tracks.length;
+                }
                 return (
-                  <React.Fragment key={`group-${gi}-${label}`}>
-                    {groupBy !== "none" && (
-                      <tr className="bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e]" onClick={() => toggleGroup(label)}>
-                        <td colSpan={12} className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            {isCollapsed
-                              ? <ChevronRight size={14} className="text-[#B3B3B3]" />
-                              : <ChevronDown size={14} className="text-[#B3B3B3]" />}
-                            <span className="text-[#B3B3B3] text-[12px] font-semibold">
-                              {GROUP_BY_LABELS[groupBy as GroupByOption]}: <span className="text-white">{label}</span>
-                              <span className="ml-2 text-[#535353]">({tracks.length} tracks)</span>
-                            </span>
-                          </div>
+                  <>
+                    {rows}
+                    {visibleRowCount < totalVisible && (
+                      <tr ref={lazyTriggerRef}>
+                        <td colSpan={totalColSpan} className="py-4 text-center">
+                          <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent border-[#1DB954]" />
                         </td>
                       </tr>
                     )}
-                    {!isCollapsed && (() => {
-                      const limit = Math.max(0, visibleRowCount - renderedCount);
-                      const visibleTracks = tracks.slice(0, limit);
-                      renderedCount += visibleTracks.length;
-                      return visibleTracks.map((track, i) => {
-                        const isSelected = selected.has(track.id);
-                        const trackKey = getTrackOrderKey(track);
-                        const trackImage = track.cover;
-                        return (
-                          <tr
-                            key={trackKey}
-                            draggable={canReorderTracks}
-                            onDragStart={() => handleTrackDragStart(trackKey)}
-                            onDragEnter={() => handleTrackDragEnter(trackKey)}
-                            onDragEnd={handleTrackDragEnd}
-                            onDragOver={(e) => e.preventDefault()}
-                            className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${
-                              isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
-                            }`}
-                            onClick={() => toggleRow(track.id)}
-                          >
-                            <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => toggleRow(track.id)}
-                                className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${
-                                  isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
-                                }`}
-                              >
-                                {isSelected && <Check size={10} className="text-black" />}
-                              </button>
-                            </td>
-                            <td className="px-2 py-2.5">
-                              {canReorderTracks && <GripVertical size={12} className="text-[#535353] hidden group-hover:inline-block mr-1 align-middle" />}
-                              <span className="text-[#B3B3B3] text-[12px] font-mono group-hover:hidden">{i + 1}</span>
-                              <Play
-                                size={12}
-                                className="text-white fill-white hidden group-hover:block cursor-pointer"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  playTrack({ uris: [`spotify:track:${track.id}`] }).catch(() =>
-                                    toast.error("Could not play track. Is Spotify open on an active device?")
-                                  );
-                                }}
-                              />
-                            </td>
-                            {columnOrder
-                              .filter((colId) => visibleCols.has(colId))
-                              .map((colId) => {
-                                if (colId === "title") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
-                                          {trackImage ? (
-                                            <ImageWithFallback src={trackImage} alt="" className="w-full h-full object-cover" />
-                                          ) : (
-                                            <Music2 size={14} className="text-[#B3B3B3]" />
-                                          )}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <p className="text-white text-[13px] font-semibold truncate max-w-[180px]">
-                                            {track.title}
-                                          </p>
-                                          <p className="text-[#B3B3B3] text-[11px] truncate max-w-[180px]">
-                                            {track.artist}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "artist") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[13px] truncate max-w-[140px]">
-                                      {track.artist}
-                                    </td>
-                                  );
-                                }
-                                if (colId === "album") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[13px] truncate max-w-[140px]">
-                                      <AlbumCell album={track.album} />
-                                    </td>
-                                  );
-                                }
-                                if (colId === "genre") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full whitespace-nowrap">
-                                        {track.genre}
-                                      </span>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "releaseYear") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                      {track.releaseYear}
-                                    </td>
-                                  );
-                                }
-                                if (colId === "dateAdded") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                      {track.dateAdded}
-                                    </td>
-                                  );
-                                }
-                                if (colId === "bpm") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                      {track.bpm}
-                                    </td>
-                                  );
-                                }
-                                if (colId === "popularity") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-[#1DB954] h-full" style={{ width: `${Math.min(100, Math.max(0, track.popularity))}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[12px] font-mono w-8 text-right">
-                                          {Math.round(track.popularity)}
-                                        </span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                 if (colId === "energy") {
-                                  const energyPct = Math.round(track.energy * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-[#1DB954] h-full" style={{ width: `${energyPct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{energyPct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "danceability") {
-                                  const val = track.danceability !== undefined ? track.danceability : 0.5;
-                                  const pct = Math.round(val * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-purple-500 h-full" style={{ width: `${pct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "valence") {
-                                  const val = track.valence !== undefined ? track.valence : 0.5;
-                                  const pct = Math.round(val * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-amber-500 h-full" style={{ width: `${pct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "acousticness") {
-                                  const val = track.acousticness !== undefined ? track.acousticness : 0.2;
-                                  const pct = Math.round(val * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-cyan-500 h-full" style={{ width: `${pct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "instrumentalness") {
-                                  const val = track.instrumentalness !== undefined ? track.instrumentalness : 0.1;
-                                  const pct = Math.round(val * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-pink-500 h-full" style={{ width: `${pct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "speechiness") {
-                                  const val = track.speechiness !== undefined ? track.speechiness : 0.05;
-                                  const pct = Math.round(val * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-indigo-500 h-full" style={{ width: `${pct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "liveness") {
-                                  const val = track.liveness !== undefined ? track.liveness : 0.1;
-                                  const pct = Math.round(val * 100);
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                          <div className="bg-emerald-500 h-full" style={{ width: `${pct}%` }} />
-                                        </div>
-                                        <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                if (colId === "loudness") {
-                                  const val = track.loudness !== undefined ? track.loudness : -6.0;
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                      {val.toFixed(1)} dB
-                                    </td>
-                                  );
-                                }
-                                if (colId === "duration") {
-                                  return (
-                                    <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                      {track.duration}
-                                    </td>
-                                  );
-                                }
-                                return null;
-                              })}
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </React.Fragment>
+                  </>
                 );
-              });
-              // Count total rendered rows to detect if sentinel is needed
-              let totalVisible = 0;
-              for (const { label, tracks } of groupedEntries) {
-                if (!collapsedGroups.has(label)) totalVisible += tracks.length;
-              }
-              return (
-                <>
-                  {rows}
-                  {visibleRowCount < totalVisible && (
-                    <tr ref={lazyTriggerRef}>
-                      <td colSpan={12} className="py-4 text-center">
-                        <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent border-[#1DB954]" />
-                      </td>
-                    </tr>
-                  )}
-                </>
-              );
-            })()}
-          </tbody>
-        </table>
+              })()}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1700,12 +1829,12 @@ function EndpointPlayground({ endpoint }: { endpoint: ApiEndpoint }) {
   );
 }
 
-function ApiReference() {
+function ApiReference({ enableDeprecatedApis }: { enableDeprecatedApis: boolean }) {
   const preferences = loadPreferences();
   const [openSection, setOpenSection] = useState<string>(preferences.apiOpenSection);
   const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(preferences.apiExpandedEndpoint);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [showDeprecated, setShowDeprecated] = useState(false);
+  const showDeprecated = enableDeprecatedApis;
 
   // Save preferences when they change
   useEffect(() => {
@@ -1724,15 +1853,6 @@ function ApiReference() {
           <div className="flex-1">
             <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Postman Collection</p>
             <h1 className="text-white text-[20px] md:text-[26px] font-extrabold leading-tight">Spotify API Reference</h1>
-          </div>
-          <div className="flex items-center gap-2 bg-[#282828] px-3 py-1.5 rounded-lg border border-[#383838]">
-            <span className="text-[11px] text-[#B3B3B3] font-semibold uppercase tracking-wider">Deprecated</span>
-            <button
-              onClick={() => setShowDeprecated(!showDeprecated)}
-              className={`w-8 h-4 rounded-full transition-colors relative cursor-pointer ${showDeprecated ? "bg-[#1DB954]" : "bg-[#535353]"}`}
-            >
-              <div className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-all ${showDeprecated ? "left-4.5" : "left-0.5"}`} />
-            </button>
           </div>
           <button
             onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
@@ -1793,64 +1913,64 @@ function ApiReference() {
                 <p className="text-[#B3B3B3] text-[12px] md:text-[13px] mb-4 md:mb-5">{endpoints.length} endpoints</p>
                 <div className="space-y-2">
                   {endpoints.map((ep, i) => {
-                  const key = `${section.name}-${i}`;
-                  const isExpanded = expandedEndpoint === key;
-                  return (
-                    <div key={i} className="rounded-lg border border-[#282828] bg-[#181818] overflow-hidden">
-                      <button className="w-full flex items-center gap-2 md:gap-4 px-3 md:px-5 py-3 md:py-3.5 hover:bg-[#1e1e1e] transition-colors text-left"
-                        onClick={() => setExpandedEndpoint(isExpanded ? null : key)}>
-                        <MethodBadge method={ep.method} />
-                        <code className="text-white text-[11px] md:text-[13px] font-mono flex-1 truncate">{ep.path}</code>
-                        {ep.deprecated && (
-                          <span className="hidden sm:inline text-[9px] px-1.5 py-0.5 rounded bg-[#e91429]/10 text-[#e91429] border border-[#e91429]/30 font-semibold uppercase tracking-wider">Deprecated</span>
-                        )}
-                        <span className="text-[#B3B3B3] text-[12px] truncate max-w-[320px] hidden lg:block">{ep.desc}</span>
-                        <ChevronDown size={14} className={`text-[#535353] transition-transform shrink-0 ${isExpanded ? "rotate-180" : ""}`} />
-                      </button>
-                      {isExpanded && (
-                        <div className="px-5 pb-4 pt-1 border-t border-[#282828] bg-[#141414]">
+                    const key = `${section.name}-${i}`;
+                    const isExpanded = expandedEndpoint === key;
+                    return (
+                      <div key={i} className="rounded-lg border border-[#282828] bg-[#181818] overflow-hidden">
+                        <button className="w-full flex items-center gap-2 md:gap-4 px-3 md:px-5 py-3 md:py-3.5 hover:bg-[#1e1e1e] transition-colors text-left"
+                          onClick={() => setExpandedEndpoint(isExpanded ? null : key)}>
+                          <MethodBadge method={ep.method} />
+                          <code className="text-white text-[11px] md:text-[13px] font-mono flex-1 truncate">{ep.path}</code>
                           {ep.deprecated && (
-                            <div className="mb-3 px-3 py-2 bg-[#e91429]/10 border border-[#e91429]/30 rounded flex items-start gap-2">
-                              <X size={14} className="text-[#e91429] shrink-0 mt-0.5" />
+                            <span className="hidden sm:inline text-[9px] px-1.5 py-0.5 rounded bg-[#e91429]/10 text-[#e91429] border border-[#e91429]/30 font-semibold uppercase tracking-wider">Deprecated</span>
+                          )}
+                          <span className="text-[#B3B3B3] text-[12px] truncate max-w-[320px] hidden lg:block">{ep.desc}</span>
+                          <ChevronDown size={14} className={`text-[#535353] transition-transform shrink-0 ${isExpanded ? "rotate-180" : ""}`} />
+                        </button>
+                        {isExpanded && (
+                          <div className="px-5 pb-4 pt-1 border-t border-[#282828] bg-[#141414]">
+                            {ep.deprecated && (
+                              <div className="mb-3 px-3 py-2 bg-[#e91429]/10 border border-[#e91429]/30 rounded flex items-start gap-2">
+                                <X size={14} className="text-[#e91429] shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="text-[#e91429] text-[11px] font-bold uppercase tracking-wider">Deprecated Endpoint</p>
+                                  <p className="text-[#e91429]/80 text-[12px] mt-1">This endpoint is deprecated and may be removed in a future version. Please use alternative endpoints.</p>
+                                </div>
+                              </div>
+                            )}
+                            <p className="text-[#B3B3B3] text-[13px] mb-3">{ep.desc}</p>
+                            {ep.params && (
+                              <div className="mb-3">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Query Parameters</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {ep.params.split(", ").map(p => (
+                                    <span key={p} className="px-2 py-0.5 bg-[#282828] rounded text-[12px] font-mono text-[#B3B3B3] border border-[#383838]">{p}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {ep.body && (
                               <div>
-                                <p className="text-[#e91429] text-[11px] font-bold uppercase tracking-wider">Deprecated Endpoint</p>
-                                <p className="text-[#e91429]/80 text-[12px] mt-1">This endpoint is deprecated and may be removed in a future version. Please use alternative endpoints.</p>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Body</p>
+                                <pre className="text-[12px] font-mono text-[#1DB954] bg-[#0d1f0f] border border-[#1DB954]/20 rounded px-4 py-3 overflow-x-auto">{ep.body}</pre>
                               </div>
+                            )}
+                            <div className="mt-3 flex items-center gap-2">
+                              <span className="text-[11px] text-[#535353]">Scope required:</span>
+                              <span className="text-[11px] font-mono text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded border border-[#383838]">
+                                {ep.method === "GET" ? "user-read-private" : ep.path.includes("player") ? "user-modify-playback-state" : "playlist-modify-private"}
+                              </span>
                             </div>
-                          )}
-                          <p className="text-[#B3B3B3] text-[13px] mb-3">{ep.desc}</p>
-                          {ep.params && (
-                            <div className="mb-3">
-                              <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Query Parameters</p>
-                              <div className="flex flex-wrap gap-2">
-                                {ep.params.split(", ").map(p => (
-                                  <span key={p} className="px-2 py-0.5 bg-[#282828] rounded text-[12px] font-mono text-[#B3B3B3] border border-[#383838]">{p}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {ep.body && (
-                            <div>
-                              <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Body</p>
-                              <pre className="text-[12px] font-mono text-[#1DB954] bg-[#0d1f0f] border border-[#1DB954]/20 rounded px-4 py-3 overflow-x-auto">{ep.body}</pre>
-                            </div>
-                          )}
-                          <div className="mt-3 flex items-center gap-2">
-                            <span className="text-[11px] text-[#535353]">Scope required:</span>
-                            <span className="text-[11px] font-mono text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded border border-[#383838]">
-                              {ep.method === "GET" ? "user-read-private" : ep.path.includes("player") ? "user-modify-playback-state" : "playlist-modify-private"}
-                            </span>
+                            <EndpointPlayground endpoint={ep} />
                           </div>
-                          <EndpointPlayground endpoint={ep} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1870,9 +1990,20 @@ function NowPlayingBar({
   const shuffle = playbackState?.shuffle_state || false;
   const repeat = playbackState?.repeat_state || "off";
   const volume = playbackState?.device?.volume_percent ?? 50;
-  
+
   // Track local progress changes during user drag
   const [localProgressPct, setLocalProgressPct] = useState<number | null>(null);
+
+  // Debounce ref for volume changes to avoid spamming Spotify volume API
+  const volumeTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (volumeTimeoutRef.current) {
+        clearTimeout(volumeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const track = playbackState?.item;
 
@@ -1934,14 +2065,21 @@ function NowPlayingBar({
     }
   };
 
-  const handleVolumeChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value);
     setPlaybackState((prev: any) => prev ? { ...prev, device: { ...prev.device, volume_percent: val } } : null);
-    try {
-      await setPlayerVolume(val);
-    } catch (err) {
-      console.warn("Failed to set volume:", err);
+
+    if (volumeTimeoutRef.current) {
+      clearTimeout(volumeTimeoutRef.current);
     }
+
+    volumeTimeoutRef.current = setTimeout(async () => {
+      try {
+        await setPlayerVolume(val);
+      } catch (err) {
+        console.warn("Failed to set volume:", err);
+      }
+    }, 250);
   };
 
   const handleProgressChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1949,7 +2087,7 @@ function NowPlayingBar({
     setLocalProgressPct(val);
   };
 
-  const handleProgressSeekEnd = async (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
+  const handleProgressSeekEnd = async () => {
     if (localProgressPct === null) return;
     const targetMs = Math.round((localProgressPct / 100) * durationMs);
     setLocalProgressPct(null);
@@ -1997,6 +2135,7 @@ function NowPlayingBar({
           )}
         </div>
         <div className="min-w-0 flex-1">
+          <p className="text-[#1DB954] text-[10px] font-bold uppercase tracking-[0.2em]">Now playing</p>
           <p className="text-white text-[12px] lg:text-[13px] font-semibold truncate" title={track.name}>{track.name}</p>
           <p className="text-[#B3B3B3] text-[11px] lg:text-[12px] truncate" title={track.artists?.map((a: any) => a.name).join(", ")}>
             {track.artists?.map((a: any) => a.name).join(", ")}
@@ -2065,7 +2204,7 @@ function formatDuration(ms: number): string {
 
 // ─── Page: Search ─────────────────────────────────────────────────────────────
 
-function SearchPage({ topArtists }: { topArtists: Artist[] }) {
+function SearchPage({ topArtists, currentPlaybackTrackId }: { topArtists: Artist[]; currentPlaybackTrackId: string | null }) {
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "tracks" | "artists" | "playlists" | "albums">("all");
   const [loading, setLoading] = useState(false);
@@ -2218,7 +2357,7 @@ function SearchPage({ topArtists }: { topArtists: Artist[] }) {
                   <div>
                     <h2 className="text-white text-[18px] font-bold mb-4">Top Result</h2>
                     <div
-                      onClick={() => playTrack({ uris: [`spotify:track:${matchedTracks[0].id}`] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                      onClick={() => playTrackSequence(matchedTracks, 0).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
                       className="bg-[#181818] hover:bg-[#282828] transition-colors rounded-lg p-5 cursor-pointer group h-[220px] flex flex-col justify-between"
                     >
                       <div className="w-20 h-20 rounded-lg bg-gradient-to-br from-violet-800 to-purple-950 flex items-center justify-center shadow-lg overflow-hidden shrink-0">
@@ -2241,28 +2380,31 @@ function SearchPage({ topArtists }: { topArtists: Artist[] }) {
                 <div>
                   <h2 className="text-white text-[18px] font-bold mb-4">Tracks</h2>
                   <div className="space-y-1">
-                    {(activeFilter === "all" ? matchedTracks.slice(0, 5) : matchedTracks).map((track, i) => (
-                      <div
-                        key={track.id}
-                        onClick={() => playTrack({ uris: [`spotify:track:${track.id}`] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
-                        className="group flex items-center gap-4 px-3 py-2 rounded-md hover:bg-[#282828] transition-colors cursor-pointer"
-                      >
-                        <span className="text-[#B3B3B3] text-[13px] font-mono w-4 text-right group-hover:hidden">{i + 1}</span>
-                        <Play size={13} className="text-white fill-white hidden group-hover:block w-4" />
-                        <div className="w-10 h-10 bg-[#282828] rounded shrink-0 flex items-center justify-center">
-                          <Music2 size={14} className="text-[#B3B3B3]" />
+                    {(activeFilter === "all" ? matchedTracks.slice(0, 5) : matchedTracks).map((track, i) => {
+                      const isPlayingTrack = currentPlaybackTrackId === String(track.id);
+                      return (
+                        <div
+                          key={track.id}
+                          onClick={() => playTrackSequence(matchedTracks, i).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"))}
+                          className={`group flex items-center gap-4 px-3 py-2 rounded-md hover:bg-[#282828] transition-colors cursor-pointer ${isPlayingTrack ? "bg-[#1DB954]/10" : ""}`}
+                        >
+                          <span className={`text-[13px] font-mono w-4 text-right group-hover:hidden ${isPlayingTrack ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>{isPlayingTrack ? "Playing" : i + 1}</span>
+                          <Play size={13} className="text-white fill-white hidden group-hover:block w-4" />
+                          <div className="w-10 h-10 bg-[#282828] rounded shrink-0 flex items-center justify-center">
+                            <Music2 size={14} className="text-[#B3B3B3]" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-[14px] font-semibold truncate">{track.title}</p>
+                            <p className="text-[#B3B3B3] text-[12px] truncate">{track.artist}</p>
+                          </div>
+                          <p className="text-[#B3B3B3] text-[13px] truncate hidden md:block max-w-[160px]">{track.album}</p>
+                          <p className="text-[#B3B3B3] text-[12px] font-mono">{track.duration}</p>
+                          <button className="text-[#B3B3B3] hover:text-white opacity-0 group-hover:opacity-100 transition-all" onClick={e => e.stopPropagation()}>
+                            <MoreHorizontal size={16} />
+                          </button>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white text-[14px] font-semibold truncate">{track.title}</p>
-                          <p className="text-[#B3B3B3] text-[12px] truncate">{track.artist}</p>
-                        </div>
-                        <p className="text-[#B3B3B3] text-[13px] truncate hidden md:block max-w-[160px]">{track.album}</p>
-                        <p className="text-[#B3B3B3] text-[12px] font-mono">{track.duration}</p>
-                        <button className="text-[#B3B3B3] hover:text-white opacity-0 group-hover:opacity-100 transition-all" onClick={e => e.stopPropagation()}>
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -2371,9 +2513,10 @@ function AllLibraries({
   setPage,
   playlists,
   playlistTracks,
-  selectedPlaylistId,
   setSelectedPlaylistId,
   topArtists,
+  currentPlaybackTrackId,
+  enableDeprecatedApis,
 }: {
   setPage: (p: Page) => void;
   playlists: Playlist[];
@@ -2381,6 +2524,8 @@ function AllLibraries({
   selectedPlaylistId: string | number;
   setSelectedPlaylistId: (id: string | number) => void;
   topArtists: Artist[];
+  currentPlaybackTrackId: string | null;
+  enableDeprecatedApis: boolean;
 }) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
@@ -2428,7 +2573,7 @@ function AllLibraries({
           <div className="flex items-center gap-3 shrink-0">
             <button onClick={() => {
               if (playlistTracks.length > 0) {
-                playTrack({ uris: playlistTracks.map(t => `spotify:track:${t.id}`) })
+                playTrackSequence(playlistTracks, 0)
                   .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
               }
             }} className="w-14 h-14 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer">
@@ -2502,18 +2647,20 @@ function AllLibraries({
                   <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">Title</th>
                   <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">Artist</th>
                   <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Album</th>
-                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Genre</th>
-                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">BPM</th>
+                  {enableDeprecatedApis && <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Genre</th>}
+                  {enableDeprecatedApis && <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">BPM</th>}
                   <th className="px-3 py-3 text-right text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold"><Clock size={12} className="inline" /></th>
                 </tr>
               </thead>
               <tbody>
                 {playlistTracks.map((track, i) => (
                   <tr key={track.id}
-                    onClick={() => playTrack({ uris: [`spotify:track:${track.id}`] }).catch(() => toast.error("Could not play track."))}
-                    className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${i % 2 === 0 ? "" : "bg-[#181818]/60"}`}>
+                    onClick={() => playTrackSequence(playlistTracks, i).catch(() => toast.error("Could not play track."))}
+                    className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${currentPlaybackTrackId === String(track.id) ? "bg-[#1DB954]/10" : i % 2 === 0 ? "" : "bg-[#181818]/60"}`}>
                     <td className="px-4 py-2.5">
-                      <span className="text-[#B3B3B3] text-[12px] font-mono group-hover:hidden">{i + 1}</span>
+                      <span className={`text-[12px] font-mono group-hover:hidden ${currentPlaybackTrackId === String(track.id) ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>
+                        {currentPlaybackTrackId === String(track.id) ? "Playing" : i + 1}
+                      </span>
                       <Play size={12} className="text-white fill-white hidden group-hover:block" />
                     </td>
                     <td className="px-3 py-2.5">
@@ -2524,10 +2671,12 @@ function AllLibraries({
                     </td>
                     <td className="px-3 py-2.5 text-[#B3B3B3] text-[13px]">{track.artist}</td>
                     <td className="px-3 py-2.5 text-[#B3B3B3] text-[13px] hidden xl:table-cell truncate max-w-[140px]">{track.album}</td>
-                    <td className="px-3 py-2.5 hidden xl:table-cell">
-                      <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full">{track.genre}</span>
-                    </td>
-                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">{track.bpm}</td>
+                    {enableDeprecatedApis && (
+                      <td className="px-3 py-2.5 hidden xl:table-cell">
+                        <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full">{track.genre}</span>
+                      </td>
+                    )}
+                    {enableDeprecatedApis && <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">{track.bpm}</td>}
                     <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono text-right">{track.duration}</td>
                   </tr>
                 ))}
@@ -2805,8 +2954,8 @@ function LibraryPlaylists({
               onClick={() => setViewSize(key)}
               title={label}
               className={`flex-1 flex items-center justify-center p-1.5 rounded transition-colors ${viewSize === key
-                  ? "bg-[#1DB954]/20 text-[#1DB954]"
-                  : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"
+                ? "bg-[#1DB954]/20 text-[#1DB954]"
+                : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"
                 }`}
             >
               <Icon size={14} />
@@ -3115,11 +3264,17 @@ export default function App() {
   const [likedSongsCount, setLikedSongsCount] = useState<number>(0);
   const [recentlyPlayed, setRecentlyPlayed] = useState<any[]>([]);
   const [topArtists, setTopArtists] = useState<Artist[]>([]);
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | number>("liked");
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | number>(preferences.selectedPlaylistId || "liked");
   const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
   const [loadingTracks, setLoadingTracks] = useState<boolean>(false);
   const [loadingTracksProgress, setLoadingTracksProgress] = useState<number>(0);
   const [playbackState, setPlaybackState] = useState<any>(null);
+  const playbackStateRef = useRef<any>(null);
+
+  useEffect(() => {
+    playbackStateRef.current = playbackState;
+  }, [playbackState]);
+
   const playlistTrackCacheRef = useRef<WorkspaceTrackCache>(readWorkspaceTrackCache());
   const workspaceLoadSessionRef = useRef(0);
   // Feature flag: deprecated Spotify endpoints (audio-features, artists/genre)
@@ -3146,14 +3301,19 @@ export default function App() {
     PreferenceUpdaters.setSidebarCollapsed(sidebarCollapsed);
   }, [sidebarCollapsed]);
 
-  const updatePlaylistTracks = (updater: React.SetStateAction<Track[]>, playlistKey = String(selectedPlaylistId)) => {
+  useEffect(() => {
+    PreferenceUpdaters.setSelectedPlaylistId(selectedPlaylistId);
+  }, [selectedPlaylistId]);
+
+  const updatePlaylistTracks = (updater: React.SetStateAction<Track[]>, playlistKey?: string) => {
+    const key = playlistKey || (String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic"));
     setPlaylistTracks(prev => {
       const next = typeof updater === "function"
         ? (updater as (value: Track[]) => Track[])(prev)
         : updater;
       playlistTrackCacheRef.current = {
         ...playlistTrackCacheRef.current,
-        [playlistKey]: next,
+        [key]: next,
       };
       writeWorkspaceTrackCache(playlistTrackCacheRef.current);
       return next;
@@ -3164,9 +3324,15 @@ export default function App() {
   useEffect(() => {
     const resolveAuth = async () => {
       try {
-        const exchanged = await handleRedirectCallback();
-        const isAuth = isAuthenticatedSync();
-        setAuthenticated(isAuth);
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+        if (code) {
+          const success = await handleRedirectCallback();
+          setAuthenticated(success);
+        } else {
+          const isAuth = isAuthenticatedSync();
+          setAuthenticated(isAuth);
+        }
       } catch (err) {
         console.error("Auth initialization failed:", err);
       } finally {
@@ -3227,6 +3393,8 @@ export default function App() {
   useEffect(() => {
     if (!authenticated || page !== "workspace") return;
 
+    const controller = new AbortController();
+    const signal = controller.signal;
     const loadSession = ++workspaceLoadSessionRef.current;
 
     const setWorkspaceLoadProgress = (progress: number) => {
@@ -3236,7 +3404,7 @@ export default function App() {
     };
 
     const loadTracks = async () => {
-      const cacheKey = String(selectedPlaylistId);
+      const cacheKey = String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic");
       const cachedTracks = playlistTrackCacheRef.current[cacheKey];
       if (cachedTracks) {
         if (workspaceLoadSessionRef.current === loadSession) {
@@ -3249,24 +3417,29 @@ export default function App() {
       setLoadingTracks(true);
       setWorkspaceLoadProgress(0);
       try {
+        setDeprecatedApisEnabled(enableDeprecatedApis);
         let tracks: Track[] = [];
         if (selectedPlaylistId === "all_my") {
           const myPlaylists = playlists.filter(p => p.owner === "yours");
-          tracks = await getMultiPlaylistTracks(["liked", ...myPlaylists.map(p => p.id)], setWorkspaceLoadProgress);
+          tracks = await getMultiPlaylistTracks(["liked", ...myPlaylists.map(p => p.id)], setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
         } else if (selectedPlaylistId === "all_followed") {
           const followedPlaylists = playlists.filter(p => p.owner === "followed");
-          tracks = await getMultiPlaylistTracks(followedPlaylists.map(p => p.id), setWorkspaceLoadProgress);
+          tracks = await getMultiPlaylistTracks(followedPlaylists.map(p => p.id), setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
         } else if (selectedPlaylistId === "all_songs") {
-          tracks = await getMultiPlaylistTracks(["liked", ...playlists.map(p => p.id)], setWorkspaceLoadProgress);
+          tracks = await getMultiPlaylistTracks(["liked", ...playlists.map(p => p.id)], setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
         } else {
-          tracks = await getPlaylistTracks(selectedPlaylistId, setWorkspaceLoadProgress);
+          tracks = await getPlaylistTracks(selectedPlaylistId, setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
         }
         if (workspaceLoadSessionRef.current !== loadSession) {
           return;
         }
         setWorkspaceLoadProgress(100);
         updatePlaylistTracks(tracks, cacheKey);
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          console.log("Track loading aborted for session:", loadSession);
+          return;
+        }
         console.error("Failed to load playlist tracks:", err);
         toast.error("Failed to load tracks from Spotify.");
       } finally {
@@ -3277,24 +3450,70 @@ export default function App() {
     };
 
     loadTracks();
-  }, [authenticated, page, selectedPlaylistId, playlists]);
 
-  // Player state polling (every 4 seconds)
+    return () => {
+      controller.abort();
+    };
+  }, [authenticated, page, selectedPlaylistId, playlists, enableDeprecatedApis]);
+
+  // Player state polling (visibility-aware, adaptive interval, and playback-action triggered)
   useEffect(() => {
     if (!authenticated) return;
 
+    let timeoutId: any;
+    let isActive = true;
+
     const pollPlayerState = async () => {
+      // Don't poll if the tab is hidden
+      if (document.hidden) return;
+
       try {
         const state = await getPlayerState();
-        setPlaybackState(state);
+        if (isActive) {
+          setPlaybackState(state);
+        }
       } catch (err) {
         console.debug("Active player state polling error (Spotify might be idle):", err);
+      } finally {
+        if (isActive) {
+          // Schedule next poll based on whether playback is active
+          const isPlaying = playbackStateRef.current?.is_playing === true;
+          // 4 seconds when playing, 15 seconds when paused/idle
+          const delay = isPlaying ? 4000 : 15000;
+          timeoutId = setTimeout(pollPlayerState, delay);
+        }
       }
     };
 
-    pollPlayerState();
-    const timer = setInterval(pollPlayerState, 4000);
-    return () => clearInterval(timer);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimeout(timeoutId);
+      } else {
+        clearTimeout(timeoutId);
+        pollPlayerState();
+      }
+    };
+
+    const handlePlaybackTrigger = () => {
+      // Schedule an immediate poll with a small delay (600ms) to allow Spotify API backend to catch up
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(pollPlayerState, 600);
+    };
+
+    // Initial poll on mount (only if document is visible)
+    if (!document.hidden) {
+      pollPlayerState();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("spotify-playback-trigger", handlePlaybackTrigger as EventListener);
+
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("spotify-playback-trigger", handlePlaybackTrigger as EventListener);
+    };
   }, [authenticated]);
 
   // Auth Loading Gating Screen
@@ -3311,6 +3530,8 @@ export default function App() {
   if (!authenticated) {
     return <Login />;
   }
+
+  const currentPlaybackTrackId = getPlaybackTrackId(playbackState?.item);
 
   return (
     <div className="dark flex flex-col h-screen w-screen overflow-hidden bg-[#121212]">
@@ -3353,10 +3574,12 @@ export default function App() {
               setPlaylistTracks={updatePlaylistTracks}
               likedSongsCount={likedSongsCount}
               setLikedSongsCount={setLikedSongsCount}
+              currentPlaybackTrackId={currentPlaybackTrackId}
+              enableDeprecatedApis={enableDeprecatedApis}
             />
           )}
-          {page === "api" && <ApiReference />}
-          {page === "search" && <SearchPage topArtists={topArtists} />}
+          {page === "api" && <ApiReference enableDeprecatedApis={enableDeprecatedApis} />}
+          {page === "search" && <SearchPage topArtists={topArtists} currentPlaybackTrackId={currentPlaybackTrackId} />}
           {page === "libraries" && (
             <AllLibraries
               setPage={setPage}
@@ -3365,6 +3588,8 @@ export default function App() {
               selectedPlaylistId={selectedPlaylistId}
               setSelectedPlaylistId={setSelectedPlaylistId}
               topArtists={topArtists}
+              currentPlaybackTrackId={currentPlaybackTrackId}
+              enableDeprecatedApis={enableDeprecatedApis}
             />
           )}
         </main>
