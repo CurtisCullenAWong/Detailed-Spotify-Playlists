@@ -12,7 +12,7 @@ export interface NavItem {
 // This file exports types for consistency
 
 export interface ColumnDefinition {
-  id: "title" | "artist" | "album" | "genre" | "releaseYear" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+  id: "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
   label: string;
   groupable?: boolean;
 }
@@ -23,6 +23,7 @@ export const ALL_COLUMNS: ColumnDefinition[] = [
   { id: "album", label: "Album", groupable: true },
   { id: "genre", label: "Genre", groupable: true },
   { id: "releaseYear", label: "Year", groupable: true },
+  { id: "releaseDate", label: "Release Date" },
   { id: "dateAdded", label: "Date Added" },
   { id: "bpm", label: "BPM" },
   { id: "energy", label: "Energy" },

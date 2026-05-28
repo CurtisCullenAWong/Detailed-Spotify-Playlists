@@ -160,7 +160,8 @@ export async function spotifyFetch(path: string, options: RequestInit = {}): Pro
         throw new Error(`Spotify API error (${response.status}): ${response.statusText}. ${errorBody}`);
       }
 
-      return response.json();
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
     } finally {
       inFlightRequests.delete(requestKey);
     }
@@ -358,6 +359,7 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
       cover: t.album?.images?.[0]?.url || "",
       genre: genre.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
       releaseYear: t.album?.release_date ? new Date(t.album.release_date).getFullYear() : 2024,
+      releaseDate: t.album?.release_date || "",
       dateAdded: t.added_at ? t.added_at.split("T")[0] : new Date().toISOString().split("T")[0],
       bpm: features?.tempo ? Math.round(features.tempo) : 120,
       energy: features?.energy !== undefined ? features.energy : 0.6,
@@ -596,19 +598,14 @@ export async function getRecentlyPlayed(): Promise<any[]> {
 // 6. Top Artists
 export async function getTopArtists(): Promise<Artist[]> {
   const data = await spotifyFetch("/me/top/artists?limit=50");
-  return data.items
-    .map((artist: any) => ({
-      id: artist.id,
-      uri: artist.uri,
-      name: artist.name,
-      genre: artist.genres?.[0]?.toUpperCase() || "POP",
-      plays: String(Math.round(artist.popularity * 15)), // Mock plays based on popularity for UX consistency
-      cover: artist.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
-    }))
-    .sort((a: Artist, b: Artist) => {
-      const playsDiff = Number(b.plays) - Number(a.plays);
-      return playsDiff !== 0 ? playsDiff : a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-    });
+  return data.items.map((artist: any, index: number) => ({
+    id: artist.id,
+    uri: artist.uri,
+    name: artist.name,
+    genre: artist.genres?.[0]?.toUpperCase() || "POP",
+    plays: String((50 - index) * 20 + Math.round(artist.popularity / 10)), // Mock play count descending with payload rank
+    cover: artist.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
+  }));
 }
 
 // 7. Search
@@ -643,6 +640,7 @@ export async function searchSpotify(query: string): Promise<{
     album: a.name,
     artist: a.artists?.map((art: any) => art.name).join(", "),
     releaseYear: a.release_date ? new Date(a.release_date).getFullYear() : 2024,
+    releaseDate: a.release_date || "",
     cover: a.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
   })) || [];
 
@@ -791,4 +789,29 @@ export async function reorderPlaylistTracks(
     const [movedTrackId] = workingOrder.splice(currentIndex, 1);
     workingOrder.splice(targetIndex, 0, movedTrackId);
   }
+}
+
+// 10. Update Playlist Details
+export async function updatePlaylistDetails(
+  playlistId: string | number,
+  details: { name: string; description?: string; public?: boolean; collaborative?: boolean }
+): Promise<any> {
+  return await spotifyFetch(`/playlists/${playlistId}`, {
+    method: "PUT",
+    body: JSON.stringify(details),
+  });
+}
+
+// 11. Upload Custom Playlist Cover Image
+export async function uploadPlaylistCoverImage(
+  playlistId: string | number,
+  base64JpegData: string
+): Promise<void> {
+  await spotifyFetch(`/playlists/${playlistId}/images`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "image/jpeg",
+    },
+    body: base64JpegData,
+  });
 }

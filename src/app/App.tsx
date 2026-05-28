@@ -35,13 +35,14 @@ import {
   Rows3,
   ArrowUpDown,
   LogOut,
+  Pencil,
+  Camera,
 } from "lucide-react";
 
 import { toast } from "sonner";
 
 // Import data from centralized data directory
 import {
-  TRACKS as STATIC_TRACKS,
   API_SECTIONS,
   BROWSE_CATEGORIES,
   ALL_COLUMNS,
@@ -75,6 +76,8 @@ import {
   reorderPlaylistTracks,
   spotifyFetch,
   setDeprecatedApisEnabled,
+  updatePlaylistDetails,
+  uploadPlaylistCoverImage,
 } from "../utils/spotifyApi";
 import Login from "./components/Login";
 import { ImageWithFallback } from "./components/figma/ImageWithFallback";
@@ -87,6 +90,11 @@ const getInitials = (name: string) => {
 };
 
 const buildTrackUri = (trackId: string | number) => `spotify:track:${trackId}`;
+
+const isUrlOrData = (str: string) => {
+  if (!str) return false;
+  return str.startsWith("http") || str.startsWith("data:");
+};
 
 const getPlaybackTrackId = (item: any): string | null => {
   if (!item) return null;
@@ -138,6 +146,7 @@ function Sidebar({
   likedSongsCount,
   selectedPlaylistId,
   setSelectedPlaylistId,
+  playingPlaylistId,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -148,6 +157,7 @@ function Sidebar({
   selectedPlaylistId: string | number;
   setSelectedPlaylistId: (id: string | number) => void;
   currentUser: any;
+  playingPlaylistId: string | number | null;
 }) {
   const preferences = loadPreferences();
   const [, setLibraryDropdownOpen] = useState(false);
@@ -201,32 +211,44 @@ function Sidebar({
         <button
           onClick={() => { setSelectedPlaylistId("liked"); setPage("workspace"); }}
           title="Liked Songs"
-          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-[#450af5] to-[#c4efd9] hover:brightness-110 shrink-0 ${selectedPlaylistId === "liked" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-[#450af5] to-[#c4efd9] hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "liked" ? "ring-2 ring-[#1DB954]" : ""}`}>
           <Heart size={14} className="text-white fill-white" />
+          {playingPlaylistId === "liked" && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+          )}
         </button>
 
         {/* All My Songs Icon */}
         <button
           onClick={() => { setSelectedPlaylistId("all_my"); setPage("workspace"); }}
           title="All My Songs"
-          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-blue-600 to-indigo-700 hover:brightness-110 shrink-0 ${selectedPlaylistId === "all_my" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-blue-600 to-indigo-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_my" ? "ring-2 ring-[#1DB954]" : ""}`}>
           <ListMusic size={14} className="text-white" />
+          {playingPlaylistId === "all_my" && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+          )}
         </button>
 
         {/* All Followed Songs Icon */}
         <button
           onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
           title="All Followed Songs"
-          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
           <RadioTower size={14} className="text-white" />
+          {playingPlaylistId === "all_followed" && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+          )}
         </button>
 
         {/* All Songs Icon */}
         <button
           onClick={() => { setSelectedPlaylistId("all_songs"); setPage("workspace"); }}
           title="All Songs"
-          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-emerald-600 to-teal-700 hover:brightness-110 shrink-0 ${selectedPlaylistId === "all_songs" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-emerald-600 to-teal-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_songs" ? "ring-2 ring-[#1DB954]" : ""}`}>
           <Music2 size={14} className="text-white" />
+          {playingPlaylistId === "all_songs" && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+          )}
         </button>
 
         {/* Playlist Icons - scrollable */}
@@ -236,10 +258,13 @@ function Sidebar({
               key={pl.id}
               onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
               title={pl.name}
-              className={`w-9 h-9 rounded-md shrink-0 hover:brightness-110 transition-all ${selectedPlaylistId === pl.id ? "ring-2 ring-[#1DB954]" : ""}`}
-              style={pl.cover.startsWith("http") ? { backgroundImage: `url(${pl.cover})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
+              className={`w-9 h-9 rounded-md shrink-0 hover:brightness-110 transition-all relative ${selectedPlaylistId === pl.id ? "ring-2 ring-[#1DB954]" : ""}`}
+              style={isUrlOrData(pl.cover) ? { backgroundImage: `url(${pl.cover})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
             >
-              {!pl.cover.startsWith("http") && <div className={`w-full h-full rounded-md ${pl.cover}`} />}
+              {!isUrlOrData(pl.cover) && <div className={`w-full h-full rounded-md ${pl.cover}`} />}
+              {playingPlaylistId === pl.id && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+              )}
             </button>
           ))}
         </div>
@@ -288,6 +313,7 @@ function Sidebar({
           likedSongsCount={likedSongsCount}
           selectedPlaylistId={selectedPlaylistId}
           setSelectedPlaylistId={setSelectedPlaylistId}
+          playingPlaylistId={playingPlaylistId}
         />
 
         {/* API Reference link */}
@@ -450,8 +476,8 @@ function Dashboard({
               }`}
           >
             <span className={`w-2 h-2 rounded-full transition-colors ${enableDeprecatedApis ? "bg-amber-400" : "bg-[#535353]"}`} />
-            <span className="hidden sm:inline">{enableDeprecatedApis ? "Audio Features ON" : "Audio Features OFF"}</span>
-            <span className="sm:hidden">{enableDeprecatedApis ? "AF" : "AF"}</span>
+            <span className="hidden sm:inline">{enableDeprecatedApis ? "Deprecated Features ON" : "Deprecated Features OFF"}</span>
+            <span className="sm:hidden">{enableDeprecatedApis ? "DF" : "DF"}</span>
           </button>
 
           <div className="flex items-center gap-3 relative group">
@@ -721,7 +747,7 @@ function Dashboard({
                 onMouseEnter={() => setHoveredPlaylist(pl.id)} onMouseLeave={() => setHoveredPlaylist(null)}
                 className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
                 <div className="relative w-full aspect-square rounded-md overflow-hidden bg-[#282828]">
-                  {pl.cover.startsWith("http") ? (
+                  {isUrlOrData(pl.cover) ? (
                     <img src={pl.cover} className="w-full h-full object-cover" alt="" />
                   ) : (
                     <div className={`w-full h-full ${pl.cover}`} />
@@ -824,8 +850,222 @@ const writeWorkspaceTrackCache = (cache: WorkspaceTrackCache) => {
   }
 };
 
+// ─── Edit Playlist Modal ──────────────────────────────────────────────────────
+
+interface EditPlaylistModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  playlist: Playlist;
+  setPlaylists: React.Dispatch<React.SetStateAction<Playlist[]>>;
+}
+
+function EditPlaylistModal({
+  isOpen,
+  onClose,
+  playlist,
+  setPlaylists,
+}: EditPlaylistModalProps) {
+  const [name, setName] = useState(playlist.name);
+  const [desc, setDesc] = useState(playlist.desc);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state when playlist changes or modal opens
+  useEffect(() => {
+    setName(playlist.name);
+    setDesc(playlist.desc);
+    setImagePreview(null);
+  }, [playlist, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== "image/jpeg" && file.type !== "image/jpg") {
+      toast.error("Spotify only supports JPEG images for playlist covers.");
+      return;
+    }
+
+    if (file.size > 256 * 1024) {
+      toast.error("Image size must be less than 256 KB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      toast.error("Playlist name cannot be empty.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // 1. Update playlist details
+      await updatePlaylistDetails(playlist.id, {
+        name: name.trim(),
+        description: desc.trim(),
+      });
+
+      // 2. Upload cover image if changed
+      let newCover = playlist.cover;
+      if (imagePreview) {
+        const base64Data = imagePreview.split(",")[1];
+        await uploadPlaylistCoverImage(playlist.id, base64Data);
+        newCover = imagePreview;
+      }
+
+      // 3. Update parent state
+      setPlaylists((prev) =>
+        prev.map((p) =>
+          String(p.id) === String(playlist.id)
+            ? { ...p, name: name.trim(), desc: desc.trim(), cover: newCover }
+            : p
+        )
+      );
+
+      toast.success("Playlist updated successfully!");
+      onClose();
+    } catch (error) {
+      console.error("Error updating playlist details:", error);
+      toast.error("Failed to update playlist details.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+      {/* Modal Card */}
+      <div
+        className="bg-[#282828] border border-[#383838] w-full max-w-[520px] rounded-lg shadow-2xl overflow-hidden text-white flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#383838]">
+          <h2 className="text-[18px] font-bold">Edit details</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[#B3B3B3] hover:text-white transition-colors cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Form Body */}
+        <form onSubmit={handleSave} className="p-6 flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row gap-5">
+            {/* Image Section */}
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-36 h-36 bg-[#181818] border border-[#383838] rounded-md overflow-hidden relative group cursor-pointer flex items-center justify-center shadow-lg"
+              >
+                {imagePreview ? (
+                  <img src={imagePreview} className="w-full h-full object-cover" alt="Preview" />
+                ) : isUrlOrData(playlist.cover) ? (
+                  <img src={playlist.cover} className="w-full h-full object-cover" alt="Cover" />
+                ) : (
+                  <div className={`w-full h-full ${playlist.cover} flex items-center justify-center`}>
+                    <Music2 size={40} className="text-white/60" />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-xs font-semibold text-white">
+                  <Camera size={20} />
+                  <span>Choose photo</span>
+                </div>
+              </div>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleImageChange}
+                accept="image/jpeg,image/jpg"
+                className="hidden"
+              />
+              <span className="text-[10px] text-[#B3B3B3] text-center max-w-[150px]">
+                JPEG up to 256KB
+              </span>
+            </div>
+
+            {/* Inputs Section */}
+            <div className="flex-1 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#B3B3B3]">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Add a name"
+                  required
+                  className="w-full bg-[#3e3e3e] border border-transparent focus:border-[#535353] focus:bg-[#4a4a4a] text-sm rounded px-3 py-2 outline-none text-white transition-colors"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#B3B3B3]">
+                  Description
+                </label>
+                <textarea
+                  value={desc}
+                  onChange={(e) => setDesc(e.target.value)}
+                  placeholder="Add an optional description"
+                  rows={4}
+                  className="w-full bg-[#3e3e3e] border border-transparent focus:border-[#535353] focus:bg-[#4a4a4a] text-sm rounded px-3 py-2 outline-none text-white transition-colors resize-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-[#B3B3B3] mt-2 leading-normal">
+            By proceeding, you agree to give Spotify access to the image you upload. Please make sure you have the right to upload the image.
+          </p>
+
+          {/* Footer Actions */}
+          <div className="flex justify-end gap-3 mt-4 border-t border-[#383838] pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="px-6 py-2 rounded-full text-sm font-bold text-white hover:scale-105 transition-transform cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="bg-white hover:bg-neutral-100 text-black px-8 py-2 rounded-full text-sm font-bold flex items-center gap-2 hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isSaving ? (
+                <>
+                  <RefreshCw size={14} className="animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function Workspace({
   playlists,
+  setPlaylists,
   selectedPlaylistId,
   playlistTracks,
   loadingTracks,
@@ -836,8 +1076,10 @@ function Workspace({
   onForceCompleteFetch,
   currentPlaybackTrackId,
   enableDeprecatedApis,
+  setPlayingPlaylistId,
 }: {
   playlists: Playlist[];
+  setPlaylists: React.Dispatch<React.SetStateAction<Playlist[]>>;
   selectedPlaylistId: string | number;
   setSelectedPlaylistId: (id: string | number) => void;
   playlistTracks: Track[];
@@ -849,10 +1091,12 @@ function Workspace({
   onForceCompleteFetch: () => void;
   currentPlaybackTrackId: string | null;
   enableDeprecatedApis: boolean;
+  setPlayingPlaylistId: (id: string | number | null) => void;
 }) {
   const preferences = loadPreferences();
 
   const [search, setSearch] = useState(preferences.workspaceSearch);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [groupBy, setGroupBy] = useState<GroupBy>(preferences.workspaceGroupBy);
   const [sortKey, setSortKey] = useState<SortKey>(preferences.workspaceSortKey as SortKey);
   const [sortDir, setSortDir] = useState<SortDir>(preferences.workspaceSortDir);
@@ -869,7 +1113,7 @@ function Workspace({
   const trackDragItemRef = useRef<string | null>(null);
   const trackDragOverRef = useRef<string | null>(null);
 
-  type ColId = "title" | "artist" | "album" | "genre" | "releaseYear" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+  type ColId = "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
   const [columnOrder, setColumnOrder] = useState<ColId[]>(preferences.workspaceColumnOrder as ColId[]);
   const [visibleCols, setVisibleCols] = useState<Set<ColId>>(new Set(preferences.workspaceVisibleColumns as ColId[]));
   const dragColRef = useRef<ColId | null>(null);
@@ -940,10 +1184,11 @@ function Workspace({
         : playlistTracks.length;
   const isCompiledVirtualPlaylist = selectedPlaylistId === "all_my" || selectedPlaylistId === "all_followed" || selectedPlaylistId === "all_songs";
   const playlistCountLabel =
-    typeof playlistTotalTracks === "number" && playlistTotalTracks >= 0
+    typeof playlistTotalTracks === "number" && playlistTotalTracks >= 0 && !isCompiledVirtualPlaylist
       ? `${playlistTracks.length.toLocaleString()} / ${playlistTotalTracks.toLocaleString()} tracks`
       : `${playlistTracks.length.toLocaleString()} tracks`;
   const isYours = (selectedPlaylistId === "liked" || activePlaylist?.owner === "yours") && selectedPlaylistId !== "all_my" && selectedPlaylistId !== "all_followed" && selectedPlaylistId !== "all_songs";
+  const isEditable = !!activePlaylist && activePlaylist.owner === "yours";
   const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
   const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
   const currentTrackOrder = trackOrders[currentPlaylistKey] ?? [];
@@ -974,6 +1219,10 @@ function Workspace({
       let cmp = 0;
       if (sortKey === "duration") {
         cmp = a.durationMs - b.durationMs;
+      } else if (sortKey === "releaseDate") {
+        const da = a.releaseDate || String(a.releaseYear || "");
+        const db = b.releaseDate || String(b.releaseYear || "");
+        cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
       } else if (typeof va === "number" && typeof vb === "number") {
         cmp = va - vb;
       } else {
@@ -1095,6 +1344,10 @@ function Workspace({
       let cmp = 0;
       if (sortKey === "duration") {
         cmp = a.durationMs - b.durationMs;
+      } else if (sortKey === "releaseDate") {
+        const da = a.releaseDate || String(a.releaseYear || "");
+        const db = b.releaseDate || String(b.releaseYear || "");
+        cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
       } else if (typeof va === "number" && typeof vb === "number") {
         cmp = va - vb;
       } else {
@@ -1273,7 +1526,7 @@ function Workspace({
       onDragEnter={() => handleColDragEnter(col)}
       onDragEnd={handleColDragEnd}
       onDragOver={e => e.preventDefault()}
-      className={`group px-3 py-3 text-left text-[10px] uppercase tracking-widest font-semibold cursor-grab active:cursor-grabbing transition-colors select-none ${col === "dateAdded" ? "min-w-[160px]" : ""} ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}>
+      className={`group px-3 py-3 text-left text-[10px] uppercase tracking-widest font-semibold cursor-grab active:cursor-grabbing transition-colors select-none ${col === "dateAdded" ? "min-w-[160px]" : col === "releaseDate" ? "min-w-[130px]" : ""} ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}>
       <button
         type="button"
         onClick={() => toggleSort(col as SortKey)}
@@ -1292,7 +1545,9 @@ function Workspace({
       {/* Header */}
       <div className="bg-gradient-to-b from-[#2a1a4e] to-[#121212] px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 shrink-0">
         <div className="flex items-end gap-4 md:gap-6">
-          <div className="w-[80px] h-[80px] md:w-[100px] md:h-[100px] rounded-lg flex items-center justify-center shadow-2xl shrink-0 overflow-hidden bg-[#282828]">
+          <div
+            className="w-[80px] h-[80px] md:w-[100px] md:h-[100px] rounded-lg flex items-center justify-center shadow-2xl shrink-0 overflow-hidden bg-[#282828] relative"
+          >
             {selectedPlaylistId === "liked" ? (
               <div className="w-full h-full bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
                 <Heart size={36} className="text-white fill-white" />
@@ -1309,7 +1564,7 @@ function Workspace({
               <div className="w-full h-full bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
                 <Music2 size={36} className="text-white" />
               </div>
-            ) : playlistCover.startsWith("http") ? (
+            ) : isUrlOrData(playlistCover) ? (
               <img src={playlistCover} className="w-full h-full object-cover" alt="" />
             ) : (
               <div className={`w-full h-full ${playlistCover} flex items-center justify-center`}>
@@ -1318,9 +1573,13 @@ function Workspace({
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3] mb-1">Playlist</p>
-            <h1 className="text-white text-[20px] md:text-[32px] font-extrabold leading-none mb-2 md:mb-3 truncate">{playlistName}</h1>
-            <p className="text-[#B3B3B3] text-[12px] md:text-[13px] mb-2 md:mb-3 hidden sm:block">{playlistDesc}</p>
+            <div className="mb-1">
+              <div className="flex items-center gap-1.5">
+                <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Playlist</p>
+              </div>
+              <h1 className="text-white text-[20px] md:text-[32px] font-extrabold leading-none mt-1 mb-1 truncate">{playlistName}</h1>
+              <p className="text-[#B3B3B3] text-[12px] md:text-[13px] hidden sm:block truncate max-w-xl">{playlistDesc}</p>
+            </div>
             <div className="flex items-center gap-2 md:gap-4 text-[11px] md:text-[13px] flex-wrap">
               <span className="text-white font-semibold flex items-center gap-2">
                 {playlistCountLabel}
@@ -1330,50 +1589,68 @@ function Workspace({
                     onClick={onForceCompleteFetch}
                     disabled={loadingTracks}
                     title={isCompiledVirtualPlaylist ? "Refresh compiled playlist tracks from Spotify" : "Fetch complete playlist data from Spotify"}
-                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${loadingTracks ? "cursor-not-allowed border-white/10 text-[#535353]" : "border-white/20 text-[#B3B3B3] hover:text-white hover:border-white/40"}`}
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border p-0 leading-none transition-colors ${loadingTracks ? "cursor-not-allowed border-white/10 text-[#535353]" : "border-white/20 text-[#B3B3B3] hover:text-white hover:border-white/40"}`}
                   >
-                    <RefreshCw size={11} className={loadingTracks ? "animate-spin" : ""} />
+                    <RefreshCw size={10} className={loadingTracks ? "animate-spin" : ""} />
                   </button>
                 )}
                 {loadingTracks && (
-                  <div className="w-3 h-3 rounded-full border-2 border-[#1DB954] border-t-transparent animate-spin" title="Fetching tracks..."></div>
+                  <span className="flex items-center gap-1.5 text-[11px] text-[#1DB954] font-medium bg-[#1DB954]/10 border border-[#1DB954]/20 px-2 py-0.5 rounded-full animate-pulse select-none" title="Streaming tracks in real-time">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#1DB954]" />
+                    Loading {Math.round(loadingTracksProgress)}%
+                  </span>
                 )}
               </span>
             </div>
-          </div>
-          <div className="flex items-center gap-2 md:gap-3 shrink-0">
-            <button
-              onClick={handleSavePlaylistOrder}
-              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
-              title={!canSortPlaylist
-                ? "Only playlists you own can be saved back to Spotify"
-                : isSavingTrackOrder
-                  ? "Sorting playlist..."
-                  : !hasUnsavedTrackOrder
-                    ? "Playlist sequence is already in sync"
-                    : "Save the current track order to Spotify"}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border ${isSavingTrackOrder ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" : hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20 cursor-pointer" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
-            >
-              <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
-              {isSavingTrackOrder ? "Sorting..." : hasUnsavedTrackOrder ? "Save Sort" : "Playlist Sorted"}
-            </button>
-            <button
-              onClick={() => {
-                if (playlistTracks.length > 0) {
-                  playTrackSequence(sorted, 0)
-                    .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
-                }
-              }}
-              className="w-10 h-10 md:w-12 md:h-12 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer"
-            >
-              <Play size={20} className="text-black fill-black ml-0.5" />
-            </button>
           </div>
         </div>
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-3 border-b border-[#282828] bg-[#121212] shrink-0 overflow-visible">
+      <div className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-3 border-b border-[#282828] bg-[#121212] shrink-0 overflow-visible flex-wrap sm:flex-nowrap">
+        <button
+          onClick={() => {
+            if (playlistTracks.length > 0) {
+              playTrackSequence(sorted, 0)
+                .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
+              if (setPlayingPlaylistId) setPlayingPlaylistId(selectedPlaylistId);
+            }
+          }}
+          className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer shrink-0 mr-1"
+        >
+          <Play size={18} className="text-black fill-black ml-0.5" />
+        </button>
+
+        {isYours && (
+          <button
+            onClick={handleSavePlaylistOrder}
+            disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
+            title={!canSortPlaylist
+              ? "Only playlists you own can be saved back to Spotify"
+              : isSavingTrackOrder
+                ? "Sorting playlist..."
+                : !hasUnsavedTrackOrder
+                  ? "Playlist sequence is already in sync"
+                  : "Save the current track order to Spotify"}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 ${isSavingTrackOrder ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" : hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20 cursor-pointer" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
+          >
+            <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
+            {isSavingTrackOrder ? "Sorting..." : hasUnsavedTrackOrder ? "Save Sort" : "Sort Playlist"}
+          </button>
+        )}
+
+        {isEditable && (
+          <button
+            type="button"
+            onClick={() => setIsEditModalOpen(true)}
+            title="Edit playlist details"
+            className="flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold bg-[#282828] border border-[#535353] hover:border-white text-white transition-all cursor-pointer shrink-0"
+          >
+            <Pencil size={13} />
+            <span>Edit Details</span>
+          </button>
+        )}
+
         <div className="flex-1 min-w-0 max-w-sm relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
           <input type="text" placeholder="Search tracks..." value={search} onChange={e => setSearch(e.target.value)}
@@ -1441,15 +1718,17 @@ function Workspace({
             )}
           </div>
 
-          <button
-            disabled={selected.size === 0 || !isYours}
-            onClick={handleDelete}
-            title={!isYours ? "You can only delete tracks from playlists you own" : "Remove selected tracks"}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${selected.size > 0 && isYours ? "bg-[#e91429]/10 text-[#e91429] hover:bg-[#e91429]/20 border border-[#e91429]/30" : "bg-[#282828] text-[#535353] cursor-not-allowed border border-transparent"}`}
-          >
-            <Trash2 size={13} />
-            Remove{selected.size > 0 && ` (${selected.size})`}
-          </button>
+          {isYours && (
+            <button
+              disabled={selected.size === 0}
+              onClick={handleDelete}
+              title="Remove selected tracks"
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${selected.size > 0 ? "bg-[#e91429]/10 text-[#e91429] hover:bg-[#e91429]/20 border border-[#e91429]/30" : "bg-[#282828] text-[#535353] cursor-not-allowed border border-transparent"}`}
+            >
+              <Trash2 size={13} />
+              Remove{selected.size > 0 && ` (${selected.size})`}
+            </button>
+          )}
 
           <div className="relative">
             <button
@@ -1495,7 +1774,7 @@ function Workspace({
 
       {/* Table */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
-        {loadingTracks ? (
+        {loadingTracks && playlistTracks.length === 0 ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center px-6 bg-[#121212]/80 backdrop-blur-sm">
             <div className="flex flex-col items-center text-center w-full max-w-sm">
               <p className="text-[#B3B3B3] text-sm font-semibold">Fetching tracks & metadata from Spotify...</p>
@@ -1507,7 +1786,15 @@ function Workspace({
             </div>
           </div>
         ) : null}
-        <div className={`h-full overflow-auto ${loadingTracks ? "opacity-0 pointer-events-none" : ""}`}>
+
+        {/* Sleek top loading progress bar when we already have tracks to display */}
+        {loadingTracks && playlistTracks.length > 0 && (
+          <div className="absolute top-0 left-0 right-0 z-20 h-[2px] bg-transparent">
+            <div className="h-full bg-gradient-to-r from-[#1DB954] via-[#29d97f] to-[#7CFFB2] transition-all duration-300 ease-out" style={{ width: `${loadingTracksProgress}%` }} />
+          </div>
+        )}
+
+        <div className={`h-full overflow-auto ${(loadingTracks && playlistTracks.length === 0) ? "opacity-0 pointer-events-none" : ""}`}>
           <table className="w-full min-w-[860px] border-collapse">
             <thead className="sticky top-0 z-10 bg-[#121212]">
               <tr className="border-b border-[#282828]">
@@ -1589,7 +1876,7 @@ function Workspace({
                               <td className="px-2 py-2.5">
                                 <span className={`text-[12px] font-mono group-hover:hidden ${isPlayingTrack ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>
                                   {isPlayingTrack ? (
-                                    <Play size={12} className="text-[#1DB954] fill-[#1DB954] inline-block" />
+                                    <Volume2 size={12} className="text-[#1DB954]" />
                                   ) : (
                                     i + 1
                                   )}
@@ -1656,10 +1943,17 @@ function Workspace({
                                       </td>
                                     );
                                   }
+                                  if (colId === "releaseDate") {
+                                    return (
+                                      <td key={colId} className="px-3 py-2.5">
+                                        <TextCarousel text={formatDate(track.releaseDate || String(track.releaseYear))} className="text-[#B3B3B3] text-[12px] font-mono max-w-[120px]" />
+                                      </td>
+                                    );
+                                  }
                                   if (colId === "dateAdded") {
                                     return (
                                       <td key={colId} className="px-3 py-2.5 min-w-[160px]">
-                                        <TextCarousel text={track.dateAdded} className="text-[#B3B3B3] text-[12px] font-mono max-w-[160px]" />
+                                        <TextCarousel text={formatDate(track.dateAdded)} className="text-[#B3B3B3] text-[12px] font-mono max-w-[160px]" />
                                       </td>
                                     );
                                   }
@@ -1828,6 +2122,14 @@ function Workspace({
         </div>
       </div>
 
+      {activePlaylist && (
+        <EditPlaylistModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          playlist={activePlaylist}
+          setPlaylists={setPlaylists}
+        />
+      )}
     </div>
   );
 }
@@ -2383,6 +2685,32 @@ function formatDuration(ms: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+// Helper to format date strings (YYYY-MM-DD or YYYY-MM or YYYY) to human-readable format (e.g. Jan 14, 2024)
+function formatDate(dateString: string | undefined): string {
+  if (!dateString) return "";
+  const parts = dateString.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  if (parts.length === 3) {
+    const year = parts[0];
+    const monthIndex = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    if (monthIndex >= 0 && monthIndex < 12 && !isNaN(day)) {
+      return `${months[monthIndex]} ${day}, ${year}`;
+    }
+  } else if (parts.length === 2) {
+    const year = parts[0];
+    const monthIndex = parseInt(parts[1], 10) - 1;
+    if (monthIndex >= 0 && monthIndex < 12) {
+      return `${months[monthIndex]} ${year}`;
+    }
+  } else if (parts.length === 1 && parts[0].length === 4) {
+    return parts[0];
+  }
+  return dateString;
+}
+
+
 // ─── Page: Search ─────────────────────────────────────────────────────────────
 
 function SearchPage({
@@ -2910,7 +3238,7 @@ function AllLibraries({
                 <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
                   className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border border-white/5">
                   <div className={`relative w-full aspect-square rounded-md overflow-hidden bg-[#282828] shrink-0`}>
-                    {pl.cover.startsWith("http") ? (
+                    {isUrlOrData(pl.cover) ? (
                       <img src={pl.cover} className="w-full h-full object-cover" alt="" />
                     ) : (
                       <div className={`w-full h-full ${pl.cover}`} />
@@ -2935,7 +3263,7 @@ function AllLibraries({
                 <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
                   className={`group w-full flex items-center gap-4 px-4 py-3 hover:bg-[#282828] transition-colors text-left ${i < filteredPlaylists.length - 1 ? "border-b border-[#282828]" : ""}`}>
                   <div className="w-12 h-12 rounded shrink-0 bg-[#282828] overflow-hidden">
-                    {pl.cover.startsWith("http") ? (
+                    {isUrlOrData(pl.cover) ? (
                       <img src={pl.cover} className="w-full h-full object-cover" alt="" />
                     ) : (
                       <div className={`w-full h-full ${pl.cover}`} />
@@ -2997,6 +3325,7 @@ function LibraryPlaylists({
   likedSongsCount,
   selectedPlaylistId,
   setSelectedPlaylistId,
+  playingPlaylistId,
 }: {
   onOpen: () => void;
   selectedView: "yours" | "all" | "followed";
@@ -3004,6 +3333,7 @@ function LibraryPlaylists({
   likedSongsCount: number;
   selectedPlaylistId: string | number;
   setSelectedPlaylistId: (id: string | number) => void;
+  playingPlaylistId: string | number | null;
 }) {
   // Load preferences from cache
   const preferences = loadPreferences();
@@ -3254,71 +3584,101 @@ function LibraryPlaylists({
         {viewSize === "large" ? (
           // Large Grid Photos View
           <div className="grid grid-cols-2 gap-2 px-2">
-            {likedSongsCount > 0 && (
-              <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
-                className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "liked" ? "border-[#1DB954]" : "border-white/5"}`}>
-                <div className="relative w-full aspect-square rounded bg-gradient-to-br from-[#450af5] to-[#8134af] overflow-hidden flex items-center justify-center">
-                  <Heart size={32} className="text-white fill-white" />
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
-                    <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
-                      <Play size={12} className="text-black fill-black ml-0.5" />
+            {likedSongsCount > 0 && (() => {
+              const isPlaying = playingPlaylistId === "liked";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
+                  className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "liked" ? "border-[#1DB954]" : "border-white/5"}`}>
+                  <div className="relative w-full aspect-square rounded bg-gradient-to-br from-[#450af5] to-[#8134af] overflow-hidden flex items-center justify-center">
+                    <Heart size={32} className="text-white fill-white" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                      <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                        <Play size={12} className="text-black fill-black ml-0.5" />
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-white text-[12px] font-semibold truncate">Liked Songs</p>
-                  <p className="text-[#B3B3B3] text-[10px]">{likedSongsCount.toLocaleString()} tracks</p>
-                </div>
-              </button>
-            )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1">
+                      <p className={`text-[12px] font-semibold truncate ${isPlaying ? "text-[#1DB954]" : "text-white"}`}>Liked Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                    <p className="text-[#B3B3B3] text-[10px]">{likedSongsCount.toLocaleString()} tracks</p>
+                  </div>
+                </button>
+              );
+            })()}
             {/* All My Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
-              className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_my" ? "border-[#1DB954]" : "border-white/5"}`}>
-              <div className="relative w-full aspect-square rounded bg-gradient-to-br from-blue-600 to-indigo-700 overflow-hidden flex items-center justify-center">
-                <ListMusic size={32} className="text-white" />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
-                  <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
-                    <Play size={12} className="text-black fill-black ml-0.5" />
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_my";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
+                  className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_my" ? "border-[#1DB954]" : "border-white/5"}`}>
+                  <div className="relative w-full aspect-square rounded bg-gradient-to-br from-blue-600 to-indigo-700 overflow-hidden flex items-center justify-center">
+                    <ListMusic size={32} className="text-white" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                      <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                        <Play size={12} className="text-black fill-black ml-0.5" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div className="min-w-0">
-                <p className="text-white text-[12px] font-semibold truncate">All My Songs</p>
-                <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
-              </div>
-            </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1">
+                      <p className={`text-[12px] font-semibold truncate ${isPlaying ? "text-[#1DB954]" : "text-white"}`}>All My Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                    <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
+                  </div>
+                </button>
+              );
+            })()}
             {/* All Followed Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
-              className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_followed" ? "border-[#1DB954]" : "border-white/5"}`}>
-              <div className="relative w-full aspect-square rounded bg-gradient-to-br from-purple-600 to-violet-700 overflow-hidden flex items-center justify-center">
-                <RadioTower size={32} className="text-white" />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
-                  <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
-                    <Play size={12} className="text-black fill-black ml-0.5" />
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_followed";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
+                  className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_followed" ? "border-[#1DB954]" : "border-white/5"}`}>
+                  <div className="relative w-full aspect-square rounded bg-gradient-to-br from-purple-600 to-violet-700 overflow-hidden flex items-center justify-center">
+                    <RadioTower size={32} className="text-white" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                      <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                        <Play size={12} className="text-black fill-black ml-0.5" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div className="min-w-0">
-                <p className="text-white text-[12px] font-semibold truncate">All Followed</p>
-                <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
-              </div>
-            </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1">
+                      <p className={`text-[12px] font-semibold truncate ${isPlaying ? "text-[#1DB954]" : "text-white"}`}>All Followed</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                    <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
+                  </div>
+                </button>
+              );
+            })()}
             {/* All Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
-              className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_songs" ? "border-[#1DB954]" : "border-white/5"}`}>
-              <div className="relative w-full aspect-square rounded bg-gradient-to-br from-emerald-600 to-teal-700 overflow-hidden flex items-center justify-center">
-                <Music2 size={32} className="text-white" />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
-                  <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
-                    <Play size={12} className="text-black fill-black ml-0.5" />
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_songs";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
+                  className={`group flex flex-col gap-2 p-2 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border ${selectedPlaylistId === "all_songs" ? "border-[#1DB954]" : "border-white/5"}`}>
+                  <div className="relative w-full aspect-square rounded bg-gradient-to-br from-emerald-600 to-teal-700 overflow-hidden flex items-center justify-center">
+                    <Music2 size={32} className="text-white" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
+                      <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                        <Play size={12} className="text-black fill-black ml-0.5" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div className="min-w-0">
-                <p className="text-white text-[12px] font-semibold truncate">All Songs</p>
-                <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
-              </div>
-            </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1">
+                      <p className={`text-[12px] font-semibold truncate ${isPlaying ? "text-[#1DB954]" : "text-white"}`}>All Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                    <p className="text-[#B3B3B3] text-[10px]">Compiled Playlist</p>
+                  </div>
+                </button>
+              );
+            })()}
             {grouped.flatMap(({ items }) => items).map(pl => (
               <button
                 key={pl.id}
@@ -3335,7 +3695,7 @@ function LibraryPlaylists({
                       <GripVertical size={12} className="text-white" />
                     </div>
                   )}
-                  {pl.cover.startsWith("http") ? (
+                  {isUrlOrData(pl.cover) ? (
                     <img src={pl.cover} className="w-full h-full object-cover" alt="" />
                   ) : (
                     <div className={`w-full h-full ${pl.cover}`} />
@@ -3347,7 +3707,10 @@ function LibraryPlaylists({
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-white text-[12px] font-semibold truncate">{pl.name}</p>
+                  <div className="flex items-center gap-1">
+                    <p className={`text-[12px] font-semibold truncate ${playingPlaylistId === pl.id ? "text-[#1DB954]" : "text-white"}`}>{pl.name}</p>
+                    {playingPlaylistId === pl.id && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                  </div>
                   <p className="text-[#B3B3B3] text-[10px]">{getPlaylistTrackCount(pl)} tracks</p>
                 </div>
               </button>
@@ -3356,39 +3719,69 @@ function LibraryPlaylists({
         ) : viewSize === "small" ? (
           // Small List View
           <>
-            {likedSongsCount > 0 && (
-              <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
-                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "liked" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-                <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
-                  <Heart size={10} className="text-white fill-white" />
-                </div>
-                <p className="text-white text-[11px] truncate">Liked Songs</p>
-              </button>
-            )}
+            {likedSongsCount > 0 && (() => {
+              const isPlaying = playingPlaylistId === "liked";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "liked" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
+                    <Heart size={10} className="text-white fill-white" />
+                  </div>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <p className={`text-[11px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>Liked Songs</p>
+                    {isPlaying && <Volume2 size={10} className="text-[#1DB954] animate-pulse shrink-0" />}
+                  </div>
+                </button>
+              );
+            })()}
             {/* All My Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
-              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_my" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-              <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
-                <ListMusic size={10} className="text-white" />
-              </div>
-              <p className="text-white text-[11px] truncate">All My Songs</p>
-            </button>
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_my";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_my" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                    <ListMusic size={10} className="text-white" />
+                  </div>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <p className={`text-[11px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>All My Songs</p>
+                    {isPlaying && <Volume2 size={10} className="text-[#1DB954] animate-pulse shrink-0" />}
+                  </div>
+                </button>
+              );
+            })()}
             {/* All Followed Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
-              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_followed" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-              <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
-                <RadioTower size={10} className="text-white" />
-              </div>
-              <p className="text-white text-[11px] truncate">All Followed Songs</p>
-            </button>
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_followed";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_followed" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                    <RadioTower size={10} className="text-white" />
+                  </div>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <p className={`text-[11px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>All Followed Songs</p>
+                    {isPlaying && <Volume2 size={10} className="text-[#1DB954] animate-pulse shrink-0" />}
+                  </div>
+                </button>
+              );
+            })()}
             {/* All Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
-              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_songs" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-              <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
-                <Music2 size={10} className="text-white" />
-              </div>
-              <p className="text-white text-[11px] truncate">All Songs</p>
-            </button>
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_songs";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${selectedPlaylistId === "all_songs" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-6 h-6 rounded shrink-0 bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
+                    <Music2 size={10} className="text-white" />
+                  </div>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <p className={`text-[11px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>All Songs</p>
+                    {isPlaying && <Volume2 size={10} className="text-[#1DB954] animate-pulse shrink-0" />}
+                  </div>
+                </button>
+              );
+            })()}
             {grouped.map(({ label, items }) => {
               const isCollapsed = label ? collapsedSections.has(label) : false;
               return (
@@ -3415,13 +3808,16 @@ function LibraryPlaylists({
                       className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
                       {isDraggable && <GripVertical size={12} className="text-[#535353] shrink-0" />}
                       <div className="w-6 h-6 rounded shrink-0 bg-[#282828] overflow-hidden">
-                        {pl.cover.startsWith("http") ? (
+                        {isUrlOrData(pl.cover) ? (
                           <img src={pl.cover} className="w-full h-full object-cover" alt="" />
                         ) : (
                           <div className={`w-full h-full ${pl.cover}`} />
                         )}
                       </div>
-                      <p className="text-white text-[11px] truncate">{pl.name}</p>
+                      <div className="flex items-center gap-1 flex-1 min-w-0">
+                        <p className={`text-[11px] truncate ${playingPlaylistId === pl.id ? "text-[#1DB954] font-semibold" : "text-white"}`}>{pl.name}</p>
+                        {playingPlaylistId === pl.id && <Volume2 size={10} className="text-[#1DB954] animate-pulse shrink-0" />}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -3431,48 +3827,78 @@ function LibraryPlaylists({
         ) : (
           // Medium List View (Default)
           <>
-            {likedSongsCount > 0 && (
-              <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
-                className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "liked" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-                <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
-                  <Heart size={14} className="text-white fill-white" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-white text-[13px] truncate">Liked Songs</p>
-                  <p className="text-[#B3B3B3] text-[11px]">Playlist · {likedSongsCount.toLocaleString()} tracks</p>
-                </div>
-              </button>
-            )}
+            {likedSongsCount > 0 && (() => {
+              const isPlaying = playingPlaylistId === "liked";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("liked"); onOpen(); }}
+                  className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "liked" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-[#450af5] to-[#8134af] flex items-center justify-center">
+                    <Heart size={14} className="text-white fill-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-[13px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>Liked Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                    <p className="text-[#B3B3B3] text-[11px]">Playlist · {likedSongsCount.toLocaleString()} tracks</p>
+                  </div>
+                </button>
+              );
+            })()}
             {/* All My Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
-              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_my" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-              <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
-                <ListMusic size={14} className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white text-[13px] truncate">All My Songs</p>
-              </div>
-            </button>
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_my";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_my"); onOpen(); }}
+                  className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_my" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                    <ListMusic size={14} className="text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-[13px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>All My Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                  </div>
+                </button>
+              );
+            })()}
             {/* All Followed Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
-              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_followed" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-              <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
-                <RadioTower size={14} className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white text-[13px] truncate">All Followed Songs</p>
-              </div>
-            </button>
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_followed";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
+                  className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_followed" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                    <RadioTower size={14} className="text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-[13px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>All Followed Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                  </div>
+                </button>
+              );
+            })()}
             {/* All Songs */}
-            <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
-              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_songs" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-              <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
-                <Music2 size={14} className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white text-[13px] truncate">All Songs</p>
-              </div>
-            </button>
+            {(() => {
+              const isPlaying = playingPlaylistId === "all_songs";
+              return (
+                <button onClick={() => { setSelectedPlaylistId("all_songs"); onOpen(); }}
+                  className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${selectedPlaylistId === "all_songs" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                  <div className="w-8 h-8 rounded shrink-0 bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center">
+                    <Music2 size={14} className="text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-[13px] truncate ${isPlaying ? "text-[#1DB954] font-semibold" : "text-white"}`}>All Songs</p>
+                      {isPlaying && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                    </div>
+                  </div>
+                </button>
+              );
+            })()}
             {grouped.map(({ label, items }) => {
               const isCollapsed = label ? collapsedSections.has(label) : false;
               return (
@@ -3498,14 +3924,17 @@ function LibraryPlaylists({
                       className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
                       {isDraggable && <GripVertical size={14} className="text-[#535353] shrink-0" />}
                       <div className="w-8 h-8 rounded shrink-0 bg-[#282828] overflow-hidden">
-                        {pl.cover.startsWith("http") ? (
+                        {isUrlOrData(pl.cover) ? (
                           <img src={pl.cover} className="w-full h-full object-cover" alt="" />
                         ) : (
                           <div className={`w-full h-full ${pl.cover}`} />
                         )}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-white text-[13px] truncate">{pl.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-[13px] truncate ${playingPlaylistId === pl.id ? "text-[#1DB954] font-semibold" : "text-white"}`}>{pl.name}</p>
+                          {playingPlaylistId === pl.id && <Volume2 size={12} className="text-[#1DB954] animate-pulse shrink-0" />}
+                        </div>
                         <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTrackCount(pl)} tracks</p>
                       </div>
                     </button>
@@ -3566,6 +3995,7 @@ export default function App() {
   const [recentlyPlayed, setRecentlyPlayed] = useState<any[]>([]);
   const [topArtists, setTopArtists] = useState<Artist[]>([]);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | number>(preferences.selectedPlaylistId || "liked");
+  const [playingPlaylistId, setPlayingPlaylistId] = useState<string | number | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
   const [loadingTracks, setLoadingTracks] = useState<boolean>(false);
   const [loadingTracksProgress, setLoadingTracksProgress] = useState<number>(0);
@@ -3576,6 +4006,17 @@ export default function App() {
 
   useEffect(() => {
     playbackStateRef.current = playbackState;
+  }, [playbackState]);
+
+  useEffect(() => {
+    if (!playbackState) return;
+    const uri = playbackState.context?.uri || "";
+    if (uri.startsWith("spotify:playlist:")) {
+      const plId = uri.split("spotify:playlist:")[1];
+      setPlayingPlaylistId(plId);
+    } else if (uri.includes(":collection") || uri.includes("collection:tracks")) {
+      setPlayingPlaylistId("liked");
+    }
   }, [playbackState]);
 
   const playlistTrackCacheRef = useRef<WorkspaceTrackCache>(readWorkspaceTrackCache());
@@ -3714,7 +4155,7 @@ export default function App() {
       }
       const cacheKey = String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic");
       const cachedTracks = playlistTrackCacheRef.current[cacheKey];
-      if (cachedTracks?.length && !forceRefreshRequested) {
+      if (cachedTracks?.length && !forceRefreshRequested && cachedTracks[0].releaseDate !== undefined) {
         if (workspaceLoadSessionRef.current === loadSession) {
           setLoadingTracks(false);
         }
@@ -3724,6 +4165,7 @@ export default function App() {
 
       setLoadingTracks(true);
       setWorkspaceLoadProgress(0);
+      setPlaylistTracks([]);
       try {
         setDeprecatedApisEnabled(enableDeprecatedApis);
         let tracks: Track[] = [];
@@ -3860,10 +4302,12 @@ export default function App() {
 
       if (trackUris.length > 0) {
         await playTrack({ uris: trackUris });
+        setPlayingPlaylistId(playlistId);
         toast.success("Playing compilation playlist");
       } else if (playlistId !== "liked" && playlistId !== "all_my" && playlistId !== "all_followed" && playlistId !== "all_songs") {
         // Regular Spotify playlist
         await playTrack({ contextUri: `spotify:playlist:${playlistId}` });
+        setPlayingPlaylistId(playlistId);
         toast.success("Playing playlist");
       } else {
         toast.error("No tracks found to play in this playlist");
@@ -3905,6 +4349,7 @@ export default function App() {
           selectedPlaylistId={selectedPlaylistId}
           setSelectedPlaylistId={setSelectedPlaylistId}
           currentUser={currentUser}
+          playingPlaylistId={playingPlaylistId}
         />
         <main className="flex-1 min-w-0 relative overflow-hidden flex">
           {page === "dashboard" && (
@@ -3928,6 +4373,7 @@ export default function App() {
           {page === "workspace" && (
             <Workspace
               playlists={playlists}
+              setPlaylists={setPlaylists}
               selectedPlaylistId={selectedPlaylistId}
               setSelectedPlaylistId={setSelectedPlaylistId}
               playlistTracks={playlistTracks}
@@ -3939,6 +4385,7 @@ export default function App() {
               onForceCompleteFetch={() => setWorkspaceForceFetchToken(v => v + 1)}
               currentPlaybackTrackId={currentPlaybackTrackId}
               enableDeprecatedApis={enableDeprecatedApis}
+              setPlayingPlaylistId={setPlayingPlaylistId}
             />
           )}
           {page === "api" && <ApiReference enableDeprecatedApis={enableDeprecatedApis} />}

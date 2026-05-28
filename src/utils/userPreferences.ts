@@ -52,8 +52,8 @@ const defaultPreferences: UserPreferences = {
   workspaceSortKey: null,
   workspaceSortDir: "asc",
   workspaceGroupBy: "none",
-  workspaceColumnOrder: ["title", "artist", "album", "genre", "releaseYear", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
-  workspaceVisibleColumns: ["title", "artist", "album", "genre", "releaseYear", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
+  workspaceColumnOrder: ["title", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
+  workspaceVisibleColumns: ["title", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
   workspaceSearch: "",
   workspaceTrackOrders: {},
   
@@ -96,6 +96,21 @@ export function loadPreferences(): UserPreferences {
           currentOrder.push(...missingColumns);
         }
         merged.workspaceColumnOrder = currentOrder;
+        migrated = true;
+      }
+
+      const defaultVisible = defaultPreferences.workspaceVisibleColumns;
+      const currentVisible = [...(merged.workspaceVisibleColumns || [])];
+      const missingVisible = defaultVisible.filter(col => !currentVisible.includes(col));
+
+      if (missingVisible.length > 0) {
+        const durationIndex = currentVisible.indexOf("duration");
+        if (durationIndex !== -1) {
+          currentVisible.splice(durationIndex, 0, ...missingVisible);
+        } else {
+          currentVisible.push(...missingVisible);
+        }
+        merged.workspaceVisibleColumns = currentVisible;
         migrated = true;
       }
 
