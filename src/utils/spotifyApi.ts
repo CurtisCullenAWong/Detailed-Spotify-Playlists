@@ -595,9 +595,11 @@ export async function getRecentlyPlayed(): Promise<any[]> {
 
 // 6. Top Artists
 export async function getTopArtists(): Promise<Artist[]> {
-  const data = await spotifyFetch("/me/top/artists?limit=10");
+  const data = await spotifyFetch("/me/top/artists?limit=50");
   return data.items
     .map((artist: any) => ({
+      id: artist.id,
+      uri: artist.uri,
       name: artist.name,
       genre: artist.genres?.[0]?.toUpperCase() || "POP",
       plays: String(Math.round(artist.popularity * 15)), // Mock plays based on popularity for UX consistency

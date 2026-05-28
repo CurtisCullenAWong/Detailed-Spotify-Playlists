@@ -19,7 +19,7 @@ export interface ColumnDefinition {
 
 export const ALL_COLUMNS: ColumnDefinition[] = [
   { id: "title", label: "Title" },
-  { id: "artist", label: "Artist", groupable: true },
+  { id: "artist", label: "Artists", groupable: true },
   { id: "album", label: "Album", groupable: true },
   { id: "genre", label: "Genre", groupable: true },
   { id: "releaseYear", label: "Year", groupable: true },
@@ -40,7 +40,7 @@ export const ALL_COLUMNS: ColumnDefinition[] = [
 export type GroupByOption = "artist" | "album" | "genre" | "releaseYear" | "none";
 
 export const GROUP_BY_LABELS: Record<GroupByOption, string> = {
-  artist: "Artist",
+  artist: "Artists",
   album: "Album",
   genre: "Genre",
   releaseYear: "Release Year",
