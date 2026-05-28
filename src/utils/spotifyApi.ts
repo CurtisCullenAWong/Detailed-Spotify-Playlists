@@ -78,6 +78,26 @@ function readPlaylistTrackTotal(tracks: unknown): number {
   return 0;
 }
 
+function dedupeByKey<T>(items: T[], getKey: (item: T) => string | number | null | undefined): T[] {
+  const seen = new Set<string>();
+  const uniqueItems: T[] = [];
+
+  for (const item of items) {
+    const key = getKey(item);
+    if (!key) {
+      uniqueItems.push(item);
+      continue;
+    }
+
+    const normalizedKey = String(key);
+    if (seen.has(normalizedKey)) continue;
+    seen.add(normalizedKey);
+    uniqueItems.push(item);
+  }
+
+  return uniqueItems;
+}
+
 // --- API Fetch Wrapper with 401 Auto-Retry + 429 Exponential Backoff ---
 
 export async function spotifyFetch(path: string, options: RequestInit = {}): Promise<any> {
@@ -391,7 +411,7 @@ export async function getCurrentUser(): Promise<{ displayName: string; imageUrl:
 
 // 2. Playlists (User's and followed ones) — fully paginated
 export async function getUserPlaylists(currentUserId: string): Promise<Playlist[]> {
-  return fetchAllPages<Playlist>(
+  const playlists = await fetchAllPages<Playlist>(
     "/me/playlists?limit=50",
     (pl) => ({
       id: pl.id,
@@ -403,6 +423,8 @@ export async function getUserPlaylists(currentUserId: string): Promise<Playlist[
     }),
     120 // 120ms between pages to stay safely under rate limits
   );
+
+  return dedupeByKey(playlists, playlist => playlist.id);
 }
 
 // 3. Playlist Tracks or Liked Songs (single playlist, enriched)
@@ -587,18 +609,20 @@ export async function getLikedSongsCount(): Promise<number> {
 // 5. Recently Played Tracks
 export async function getRecentlyPlayed(): Promise<any[]> {
   const data = await spotifyFetch("/me/player/recently-played?limit=6");
-  return data.items.map((item: any) => ({
+  const recentlyPlayed = data.items.map((item: any) => ({
     title: item.track.name,
     ago: formatRelativeTime(item.played_at),
     cover: item.track.album.images?.[0]?.url || "bg-gradient-to-br from-blue-900 to-indigo-950",
     uri: item.track.uri,
   }));
+
+  return dedupeByKey(recentlyPlayed, item => item.uri);
 }
 
 // 6. Top Artists
 export async function getTopArtists(): Promise<Artist[]> {
   const data = await spotifyFetch("/me/top/artists?limit=50");
-  return data.items.map((artist: any, index: number) => ({
+  const topArtists = data.items.map((artist: any, index: number) => ({
     id: artist.id,
     uri: artist.uri,
     name: artist.name,
@@ -606,6 +630,8 @@ export async function getTopArtists(): Promise<Artist[]> {
     plays: String((50 - index) * 20 + Math.round(artist.popularity / 10)), // Mock play count descending with payload rank
     cover: artist.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
   }));
+
+  return dedupeByKey(topArtists, artist => artist.id);
 }
 
 // 7. Search
@@ -618,7 +644,11 @@ export async function searchSpotify(query: string): Promise<{
   const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track,artist,playlist,album&limit=10`);
 
   // Map Spotify entities
-  const tracks = data.tracks?.items ? await enrichTracks(data.tracks.items) : [];
+  const tracks = data.tracks?.items ? Array.from(
+    new Map(
+      (await enrichTracks(data.tracks.items)).map(track => [String(track.id), track])
+    ).values()
+  ) : [];
 
   const artists = data.artists?.items?.map((a: any) => ({
     name: a.name,

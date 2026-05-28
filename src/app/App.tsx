@@ -188,8 +188,8 @@ function Sidebar({
     { icon: Search, label: "Search", id: "search" as Page },
   ];
 
-  // Filter playlists based on selected view (exclude followed when deprecated APIs are off)
-  const visiblePlaylists = enableDeprecatedApis ? playlists : playlists.filter(pl => pl.owner !== "followed");
+  // Filter playlists based on selected view (include followed playlists regardless of feature flag)
+  const visiblePlaylists = playlists;
   const filteredPlaylists =
     selectedLibraryView === "all"
       ? visiblePlaylists
@@ -234,17 +234,15 @@ function Sidebar({
         </button>
 
         {/* All Followed Songs Icon */}
-        {enableDeprecatedApis && (
-          <button
-            onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
-            title="All Followed Songs"
-            className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
-            <RadioTower size={14} className="text-white" />
-            {playingPlaylistId === "all_followed" && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
-            )}
-          </button>
-        )}
+        <button
+          onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
+          title="All Followed Songs"
+          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
+          <RadioTower size={14} className="text-white" />
+          {playingPlaylistId === "all_followed" && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+          )}
+        </button>
 
         {/* All Songs Icon */}
         <button
@@ -687,7 +685,7 @@ function Dashboard({
                   {([
                     { key: "all" as const, label: "All Playlists" },
                     { key: "yours" as const, label: "My Playlists" },
-                    ...(enableDeprecatedApis ? [{ key: "followed" as const, label: "Followed Playlists" }] : []),
+                    { key: "followed" as const, label: "Followed Playlists" },
                   ] as const).map(({ key, label }) => (
                     <button
                       key={key}
@@ -1164,6 +1162,7 @@ function Workspace({
   const [sortKey, setSortKey] = useState<SortKey>(preferences.workspaceSortKey as SortKey);
   const [sortDir, setSortDir] = useState<SortDir>(preferences.workspaceSortDir);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
+  const lastClickedIndexRef = useRef<number | null>(null);
   const [groupByOpen, setGroupByOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [playlistFlyoutOpen, setPlaylistFlyoutOpen] = useState(false);
@@ -1485,6 +1484,30 @@ function Workspace({
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const handleRowClick = (e: React.MouseEvent, id: string | number) => {
+    // compute index in the currently visible sorted list
+    const idx = sorted.findIndex(t => String(t.id) === String(id));
+
+    if (e.shiftKey && lastClickedIndexRef.current !== null && idx !== -1) {
+      const start = Math.min(lastClickedIndexRef.current, idx);
+      const end = Math.max(lastClickedIndexRef.current, idx);
+      const idsInRange = sorted.slice(start, end + 1).map(t => t.id);
+      setSelected(prev => {
+        const next = new Set(prev);
+        idsInRange.forEach(i => next.add(i));
+        return next;
+      });
+    } else if (e.ctrlKey || e.metaKey) {
+      // ctrl/cmd click -> toggle single
+      toggleRow(id);
+    } else {
+      // simple click -> toggle single (preserve existing behavior)
+      toggleRow(id);
+    }
+
+    lastClickedIndexRef.current = idx !== -1 ? idx : lastClickedIndexRef.current;
   };
 
   const toggleAll = () => {
@@ -1929,11 +1952,11 @@ function Workspace({
                               onDragOver={(e) => e.preventDefault()}
                               className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
                                 }`}
-                              onClick={() => toggleRow(track.id)}
+                              onClick={(e) => handleRowClick(e, track.id)}
                             >
                               <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                                 <button
-                                  onClick={() => toggleRow(track.id)}
+                                    onClick={(e) => { e.stopPropagation(); handleRowClick(e, track.id); }}
                                   className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
                                     }`}
                                 >
@@ -3145,6 +3168,8 @@ const getPlaylistGroupLabel = (playlist: Playlist, key: Exclude<PlGroupKey, "non
   return getPlaylistOwnerLabel(playlist.owner);
 };
 
+const PLAYLIST_OWNER_GROUP_ORDER = ["My Playlists", "Followed Playlists"] as const;
+
 function LibraryPlaylists({
   onOpen,
   selectedView,
@@ -3220,8 +3245,8 @@ function LibraryPlaylists({
     PreferenceUpdaters.setPlaylistOrder(customOrder);
   }, [customOrder]);
 
-  // Filter based on selected view
-  const visiblePlaylists = enableDeprecatedApis ? playlists : playlists.filter(pl => pl.owner !== "followed");
+  // Filter based on selected view (include followed playlists regardless of feature flag)
+  const visiblePlaylists = playlists;
   const filtered = selectedView === "all"
     ? visiblePlaylists
     : visiblePlaylists.filter(pl => pl.owner === selectedView);
@@ -3265,7 +3290,13 @@ function LibraryPlaylists({
         map.get(key)!.push(pl);
         return map;
       }, new Map<string, Playlist[]>())
-    ).map(([label, items]) => ({ label, items }));
+    ).map(([label, items]) => ({ label, items }))
+      .sort((left, right) => {
+        if (groupKey !== "owner") return 0;
+        const leftIndex = PLAYLIST_OWNER_GROUP_ORDER.indexOf(left.label as (typeof PLAYLIST_OWNER_GROUP_ORDER)[number]);
+        const rightIndex = PLAYLIST_OWNER_GROUP_ORDER.indexOf(right.label as (typeof PLAYLIST_OWNER_GROUP_ORDER)[number]);
+        return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
+      });
 
   const toggleSort = (key: PlSortKey) => {
     if (key === "none") { setSortKey("none"); return; }
@@ -3317,7 +3348,7 @@ function LibraryPlaylists({
     dragOverItemRef.current = null;
   };
 
-  const isDraggable = sortKey === "none" && groupKey === "none";
+  const isDraggable = sortKey === "none";
 
   if (loadingProfile && playlists.length === 0) {
     // Simple skeleton while profile/playlists load
