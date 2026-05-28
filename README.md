@@ -26,16 +26,6 @@
 
   Open the app in your browser (usually at `http://localhost:5173` or `http://127.0.0.1:5173`).
 
-  ## Quick Dev Tip
-
-  While the app is running you can programmatically navigate to the compiled "All Songs" virtual playlist by opening your browser devtools console and running:
-
-  ```js
-  window.goToAllSongs()
-  ```
-
-  This helper is attached to `window` during development to make it faster to jump to the combined "All Songs" view.
-
   ## Notes
 
   - The project contains several virtual/compiled playlists (e.g. `liked`, `all_my`, `all_followed`, `all_songs`). Use the UI or the dev helper above to navigate between them.
