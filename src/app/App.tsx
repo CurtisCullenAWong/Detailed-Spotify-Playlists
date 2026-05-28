@@ -150,9 +150,10 @@ function Sidebar({
   currentUser: any;
 }) {
   const preferences = loadPreferences();
-  const [libraryDropdownOpen, setLibraryDropdownOpen] = useState(false);
-  const [selectedLibraryView, setSelectedLibraryView] = useState<"all" | "yours" | "followed">(preferences.libraryView);
+  const [, setLibraryDropdownOpen] = useState(false);
+  const [selectedLibraryView] = useState<"all" | "yours" | "followed">(preferences.libraryView);
   const libraryDropdownRef = useRef<HTMLDivElement>(null);
+  const [] = useState<{ top: number; right: number } | null>(null);
 
   // Save library view preference when it changes
   useEffect(() => {
@@ -280,40 +281,6 @@ function Sidebar({
 
       {/* Library Panel */}
       <div className="mt-2 pt-2 border-t border-[#282828] flex-1 overflow-hidden flex flex-col min-h-0">
-        <div ref={libraryDropdownRef} className="flex items-center gap-1 px-4 py-2 relative">
-          <button
-            onClick={() => setLibraryDropdownOpen(o => !o)}
-            className="flex items-center gap-1 flex-1 min-w-0 text-[#B3B3B3] hover:text-white transition-colors group">
-            <Library size={11} className="shrink-0" />
-            <span className="text-[10px] font-bold uppercase tracking-widest mr-auto truncate">
-              {selectedLibraryView === "yours" ? "My Playlists" : selectedLibraryView === "all" ? "All Playlists" : "Followed Playlists"}
-            </span>
-            <ChevronDown size={11} className={`shrink-0 transition-transform ${libraryDropdownOpen ? "rotate-180" : ""}`} />
-          </button>
-          <div className="relative">
-            {libraryDropdownOpen && (
-              <div className="absolute top-full right-0 mt-1 w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
-                {[
-                  { key: "yours" as const, label: "My Playlists" },
-                  { key: "all" as const, label: "All Playlists" },
-                  { key: "followed" as const, label: "Followed Playlists" }
-                ].map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => {
-                      setSelectedLibraryView(key);
-                      setLibraryDropdownOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors text-left ${selectedLibraryView === key ? "text-[#1DB954]" : "text-[#B3B3B3]"
-                      }`}>
-                    {label}
-                    {selectedLibraryView === key && <Check size={10} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
         <LibraryPlaylists
           onOpen={() => setPage("workspace")}
           selectedView={selectedLibraryView}
@@ -1273,9 +1240,9 @@ function Workspace({
                 ? "Only playlists you own can be saved back to Spotify"
                 : isSavingTrackOrder
                   ? "Sorting playlist..."
-                : !hasUnsavedTrackOrder
-                  ? "Playlist sequence is already in sync"
-                  : "Save the current track order to Spotify"}
+                  : !hasUnsavedTrackOrder
+                    ? "Playlist sequence is already in sync"
+                    : "Save the current track order to Spotify"}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border ${isSavingTrackOrder ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" : hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20 cursor-pointer" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
             >
               <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
@@ -2879,10 +2846,23 @@ function LibraryPlaylists({
   const [customOrder, setCustomOrder] = useState<string[]>(preferences.playlistOrder);
   const [sortOpen, setSortOpen] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const sortRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
+  const sortBtnRef = useRef<HTMLButtonElement>(null);
+  const groupBtnRef = useRef<HTMLButtonElement>(null);
+  const [sortDropdownPos, setSortDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [groupDropdownPos, setGroupDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const dragItemRef = useRef<string | null>(null);
   const dragOverItemRef = useRef<string | null>(null);
+
+  const toggleSection = (label: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -3010,17 +2990,27 @@ function LibraryPlaylists({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-2 pt-2 pb-2">
-      {/* toolbar */}
-      <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+      {/* toolbar: Group + Sort in one row */}
+      <div className="flex items-center gap-1.5 px-2 pb-2">
         {/* Group by */}
-        <div ref={groupRef} className="relative min-w-0">
-          <button onClick={() => setGroupOpen(o => !o)}
+        <div ref={groupRef} className="relative flex-1 min-w-0">
+          <button
+            ref={groupBtnRef}
+            onClick={() => {
+              if (!groupOpen) {
+                const rect = groupBtnRef.current?.getBoundingClientRect();
+                if (rect) setGroupDropdownPos({ top: rect.bottom + 4, left: rect.left });
+              }
+              setGroupOpen(o => !o);
+            }}
             className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${groupKey !== "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
             <Library size={11} />
             {groupKey !== "none" ? "Grouped" : "Group"}
           </button>
-          {groupOpen && (
-            <div className="absolute top-full left-0 mt-1 w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+          {groupOpen && groupDropdownPos && (
+            <div
+              style={{ position: "fixed", top: groupDropdownPos.top, left: groupDropdownPos.left, zIndex: 9999 }}
+              className="w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl py-1">
               {(["none", ...PLAYLIST_GROUP_OPTIONS.map(option => option.key)] as PlGroupKey[]).map(opt => (
                 <button key={opt} onClick={() => { setGroupKey(opt); setGroupOpen(false); }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] capitalize hover:bg-[#383838] transition-colors ${groupKey === opt ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
@@ -3032,15 +3022,28 @@ function LibraryPlaylists({
           )}
         </div>
 
+        {/* divider */}
+        <div className="w-px h-4 bg-[#383838] shrink-0" />
+
         {/* Sort by */}
-        <div ref={sortRef} className="relative min-w-0">
-          <button onClick={() => setSortOpen(o => !o)}
+        <div ref={sortRef} className="relative flex-1 min-w-0">
+          <button
+            ref={sortBtnRef}
+            onClick={() => {
+              if (!sortOpen) {
+                const rect = sortBtnRef.current?.getBoundingClientRect();
+                if (rect) setSortDropdownPos({ top: rect.bottom + 4, left: rect.left });
+              }
+              setSortOpen(o => !o);
+            }}
             className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${sortKey !== "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
             <ArrowUpDown size={11} />
-            <span>Sort</span>
+            <span>Sort{sortKey !== "none" && ` ${sortDir === "asc" ? "↑" : "↓"}`}</span>
           </button>
-          {sortOpen && (
-            <div className="absolute top-full left-0 mt-1 w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+          {sortOpen && sortDropdownPos && (
+            <div
+              style={{ position: "fixed", top: sortDropdownPos.top, left: sortDropdownPos.left, zIndex: 9999 }}
+              className="w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl py-1">
               {(["none", ...PLAYLIST_SORT_OPTIONS.map(option => option.key)] as PlSortKey[]).map(opt => (
                 <button key={opt} onClick={() => { toggleSort(opt); setSortOpen(false); }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors ${sortKey === opt ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
@@ -3217,34 +3220,44 @@ function LibraryPlaylists({
               </div>
               <p className="text-white text-[11px] truncate">All Songs</p>
             </button>
-            {grouped.map(({ label, items }) => (
-              <div key={label}>
-                {label && (
-                  <p className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#535353]">{label}</p>
-                )}
-                {items.map(pl => (
-                  <button
-                    key={pl.id}
-                    onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
-                    draggable={isDraggable}
-                    onDragStart={() => handleDragStart(pl.id)}
-                    onDragEnter={() => handleDragEnter(pl.id)}
-                    onDragEnd={handleDragEnd}
-                    onDragOver={(e) => e.preventDefault()}
-                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-                    {isDraggable && <GripVertical size={12} className="text-[#535353] shrink-0" />}
-                    <div className="w-6 h-6 rounded shrink-0 bg-[#282828] overflow-hidden">
-                      {pl.cover.startsWith("http") ? (
-                        <img src={pl.cover} className="w-full h-full object-cover" alt="" />
-                      ) : (
-                        <div className={`w-full h-full ${pl.cover}`} />
-                      )}
-                    </div>
-                    <p className="text-white text-[11px] truncate">{pl.name}</p>
-                  </button>
-                ))}
-              </div>
-            ))}
+            {grouped.map(({ label, items }) => {
+              const isCollapsed = label ? collapsedSections.has(label) : false;
+              return (
+                <div key={label}>
+                  {label && (
+                    <button
+                      onClick={() => toggleSection(label)}
+                      className="w-full flex items-center gap-1 px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#535353] hover:text-[#B3B3B3] transition-colors text-left">
+                      <ChevronDown size={10} className={`shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                      {label}
+                      <span className="ml-auto font-mono normal-case tracking-normal opacity-60">{items.length}</span>
+                    </button>
+                  )}
+                  {!isCollapsed && items.map(pl => (
+                    <button
+                      key={pl.id}
+                      onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
+                      draggable={isDraggable}
+                      onDragStart={() => handleDragStart(pl.id)}
+                      onDragEnter={() => handleDragEnter(pl.id)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => e.preventDefault()
+                      }
+                      className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                      {isDraggable && <GripVertical size={12} className="text-[#535353] shrink-0" />}
+                      <div className="w-6 h-6 rounded shrink-0 bg-[#282828] overflow-hidden">
+                        {pl.cover.startsWith("http") ? (
+                          <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                        ) : (
+                          <div className={`w-full h-full ${pl.cover}`} />
+                        )}
+                      </div>
+                      <p className="text-white text-[11px] truncate">{pl.name}</p>
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
           </>
         ) : (
           // Medium List View (Default)
@@ -3269,7 +3282,6 @@ function LibraryPlaylists({
               </div>
               <div className="min-w-0">
                 <p className="text-white text-[13px] truncate">All My Songs</p>
-                <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTracks.length.toLocaleString()} tracks</p>
               </div>
             </button>
             {/* All Followed Songs */}
@@ -3280,7 +3292,6 @@ function LibraryPlaylists({
               </div>
               <div className="min-w-0">
                 <p className="text-white text-[13px] truncate">All Followed Songs</p>
-                <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTracks.length.toLocaleString()} tracks</p>
               </div>
             </button>
             {/* All Songs */}
@@ -3291,40 +3302,48 @@ function LibraryPlaylists({
               </div>
               <div className="min-w-0">
                 <p className="text-white text-[13px] truncate">All Songs</p>
-                <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTracks.length.toLocaleString()} tracks</p>
               </div>
             </button>
-            {grouped.map(({ label, items }) => (
-              <div key={label}>
-                {label && (
-                  <p className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#535353]">{label}</p>
-                )}
-                {items.map(pl => (
-                  <button
-                    key={pl.id}
-                    onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
-                    draggable={isDraggable}
-                    onDragStart={() => handleDragStart(pl.id)}
-                    onDragEnter={() => handleDragEnter(pl.id)}
-                    onDragEnd={handleDragEnd}
-                    onDragOver={(e) => e.preventDefault()}
-                    className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-                    {isDraggable && <GripVertical size={14} className="text-[#535353] shrink-0" />}
-                    <div className="w-8 h-8 rounded shrink-0 bg-[#282828] overflow-hidden">
-                      {pl.cover.startsWith("http") ? (
-                        <img src={pl.cover} className="w-full h-full object-cover" alt="" />
-                      ) : (
-                        <div className={`w-full h-full ${pl.cover}`} />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-white text-[13px] truncate">{pl.name}</p>
-                      <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTrackCount(pl)} tracks</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ))}
+            {grouped.map(({ label, items }) => {
+              const isCollapsed = label ? collapsedSections.has(label) : false;
+              return (
+                <div key={label}>
+                  {label && (
+                    <button
+                      onClick={() => toggleSection(label)}
+                      className="w-full flex items-center gap-1 px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#535353] hover:text-[#B3B3B3] transition-colors text-left">
+                      <ChevronDown size={10} className={`shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                      {label}
+                      <span className="ml-auto font-mono normal-case tracking-normal opacity-60">{items.length}</span>
+                    </button>
+                  )}
+                  {!isCollapsed && items.map(pl => (
+                    <button
+                      key={pl.id}
+                      onClick={() => { setSelectedPlaylistId(pl.id); onOpen(); }}
+                      draggable={isDraggable}
+                      onDragStart={() => handleDragStart(pl.id)}
+                      onDragEnter={() => handleDragEnter(pl.id)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => e.preventDefault()}
+                      className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-[13px] transition-colors text-left ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''} ${selectedPlaylistId === pl.id ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+                      {isDraggable && <GripVertical size={14} className="text-[#535353] shrink-0" />}
+                      <div className="w-8 h-8 rounded shrink-0 bg-[#282828] overflow-hidden">
+                        {pl.cover.startsWith("http") ? (
+                          <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                        ) : (
+                          <div className={`w-full h-full ${pl.cover}`} />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white text-[13px] truncate">{pl.name}</p>
+                        <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTrackCount(pl)} tracks</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
           </>
         )}
       </div>
