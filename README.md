@@ -1,8 +1,6 @@
 
   # Spotify
 
-  This is a local code bundle for a Spotify manager UI. The original design can be found at https://www.figma.com/design/qKGu9nZLMn1BHdAW3Ojisp/Spotify.
-
   ## Requirements
 
   - Node.js (recommended >= 18)
