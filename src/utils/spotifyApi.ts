@@ -397,7 +397,7 @@ export async function getUserPlaylists(currentUserId: string): Promise<Playlist[
       id: pl.id,
       name: pl.name || "Untitled Playlist",
       desc: pl.description || "No description",
-      tracks: readPlaylistTrackTotal(pl.tracks),
+      tracks: readPlaylistTrackTotal(pl.tracks ?? pl.items),
       cover: pl.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
       owner: pl.owner?.id === currentUserId ? "yours" : "followed",
     }),
@@ -615,7 +615,7 @@ export async function searchSpotify(query: string): Promise<{
   playlists: Playlist[];
   albums: any[];
 }> {
-  const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track,artist,playlist,album&limit=12`);
+  const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track,artist,playlist,album&limit=10`);
 
   // Map Spotify entities
   const tracks = data.tracks?.items ? await enrichTracks(data.tracks.items) : [];

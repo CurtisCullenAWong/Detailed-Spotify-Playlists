@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Home,
   Search,
@@ -23,7 +23,6 @@ import {
   GripVertical,
   X,
   Check,
-  Clock,
   MoreHorizontal,
   Code2,
   TrendingUp,
@@ -147,6 +146,7 @@ function Sidebar({
   selectedPlaylistId,
   setSelectedPlaylistId,
   playingPlaylistId,
+  enableDeprecatedApis,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -158,6 +158,7 @@ function Sidebar({
   setSelectedPlaylistId: (id: string | number) => void;
   currentUser: any;
   playingPlaylistId: string | number | null;
+  enableDeprecatedApis: boolean;
 }) {
   const preferences = loadPreferences();
   const [, setLibraryDropdownOpen] = useState(false);
@@ -185,11 +186,12 @@ function Sidebar({
     { icon: Search, label: "Search", id: "search" as Page },
   ];
 
-  // Filter playlists based on selected view
+  // Filter playlists based on selected view (exclude followed when deprecated APIs are off)
+  const visiblePlaylists = enableDeprecatedApis ? playlists : playlists.filter(pl => pl.owner !== "followed");
   const filteredPlaylists =
     selectedLibraryView === "all"
-      ? playlists
-      : playlists.filter(pl => pl.owner === selectedLibraryView);
+      ? visiblePlaylists
+      : visiblePlaylists.filter(pl => pl.owner === selectedLibraryView);
 
   if (collapsed) {
     return (
@@ -230,15 +232,17 @@ function Sidebar({
         </button>
 
         {/* All Followed Songs Icon */}
-        <button
-          onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
-          title="All Followed Songs"
-          className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
-          <RadioTower size={14} className="text-white" />
-          {playingPlaylistId === "all_followed" && (
-            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
-          )}
-        </button>
+        {enableDeprecatedApis && (
+          <button
+            onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
+            title="All Followed Songs"
+            className={`w-9 h-9 flex items-center justify-center rounded-md transition-all bg-gradient-to-br from-purple-600 to-violet-700 hover:brightness-110 shrink-0 relative ${selectedPlaylistId === "all_followed" ? "ring-2 ring-[#1DB954]" : ""}`}>
+            <RadioTower size={14} className="text-white" />
+            {playingPlaylistId === "all_followed" && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+            )}
+          </button>
+        )}
 
         {/* All Songs Icon */}
         <button
@@ -314,6 +318,7 @@ function Sidebar({
           selectedPlaylistId={selectedPlaylistId}
           setSelectedPlaylistId={setSelectedPlaylistId}
           playingPlaylistId={playingPlaylistId}
+          enableDeprecatedApis={enableDeprecatedApis}
         />
 
         {/* API Reference link */}
@@ -395,7 +400,10 @@ function Dashboard({
       value: playlists.length.toString(),
       sub: "User & followed collections",
       color: "text-[#1DB954]",
-      onClick: () => setPage("libraries")
+      onClick: () => {
+        setSelectedPlaylistId("all_songs");
+        setPage("workspace");
+        }
     },
     {
       label: "Saved Songs",
@@ -608,8 +616,12 @@ function Dashboard({
                   </div>
                   <div className="text-center">
                     <p className="text-white text-[13px] font-semibold truncate max-w-[100px]">{artist.name}</p>
-                    <p className="text-[#B3B3B3] text-[11px] truncate max-w-[100px]">{artist.genre}</p>
-                    <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} popularity</p>
+                    {enableDeprecatedApis && (
+                      <>
+                        <p className="text-[#B3B3B3] text-[11px] truncate max-w-[100px]">{artist.genre}</p>
+                        <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} popularity</p>
+                      </>
+                    )}
                   </div>
                 </button>
               ))}
@@ -632,11 +644,11 @@ function Dashboard({
                   {([
                     { key: "all" as const, label: "All Playlists" },
                     { key: "yours" as const, label: "My Playlists" },
-                    { key: "followed" as const, label: "Followed Playlists" },
+                    ...(enableDeprecatedApis ? [{ key: "followed" as const, label: "Followed Playlists" }] : []),
                   ] as const).map(({ key, label }) => (
                     <button
                       key={key}
-                      onClick={() => { setLibraryView(key); setHeaderDropdownOpen(false); }}
+                      onClick={() => { setLibraryView(key as typeof libraryView); setHeaderDropdownOpen(false); }}
                       className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors text-left ${libraryView === key ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
                       {label}
                       {libraryView === key && <Check size={10} />}
@@ -696,28 +708,30 @@ function Dashboard({
               </div>
             </div>
             {/* All Followed Songs */}
-            <div onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
-              onMouseEnter={() => setHoveredPlaylist("all_followed")} onMouseLeave={() => setHoveredPlaylist(null)}
-              className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
-              <div className="relative w-full aspect-square rounded-md overflow-hidden bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
-                <RadioTower size={48} className="text-white" />
-                <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === "all_followed" ? "opacity-100" : "opacity-0"}`}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onPlayPlaylist) onPlayPlaylist("all_followed");
-                    }}
-                    className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200 hover:scale-105 z-10 focus:outline-none"
-                  >
-                    <Play size={16} className="text-black fill-black ml-0.5" />
-                  </button>
+            {enableDeprecatedApis && (
+              <div onClick={() => { setSelectedPlaylistId("all_followed"); setPage("workspace"); }}
+                onMouseEnter={() => setHoveredPlaylist("all_followed")} onMouseLeave={() => setHoveredPlaylist(null)}
+                className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all duration-200 text-left cursor-pointer border border-white/5 w-[150px] sm:w-[170px] md:w-[190px] shrink-0">
+                <div className="relative w-full aspect-square rounded-md overflow-hidden bg-gradient-to-br from-purple-600 to-violet-700 flex items-center justify-center">
+                  <RadioTower size={48} className="text-white" />
+                  <div className={`absolute inset-0 flex items-end justify-end p-3 transition-opacity duration-200 ${hoveredPlaylist === "all_followed" ? "opacity-100" : "opacity-0"}`}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onPlayPlaylist) onPlayPlaylist("all_followed");
+                      }}
+                      className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center shadow-xl translate-y-1 group-hover:translate-y-0 transition-transform duration-200 hover:scale-105 z-10 focus:outline-none"
+                    >
+                      <Play size={16} className="text-black fill-black ml-0.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white font-semibold text-[14px] truncate">All Followed</p>
+                  <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">Compiled Playlist</p>
                 </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-white font-semibold text-[14px] truncate">All Followed</p>
-                <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">Compiled Playlist</p>
-              </div>
-            </div>
+            )}
             {/* All Songs */}
             <div onClick={() => { setSelectedPlaylistId("all_songs"); setPage("workspace"); }}
               onMouseEnter={() => setHoveredPlaylist("all_songs")} onMouseLeave={() => setHoveredPlaylist(null)}
@@ -987,6 +1001,8 @@ function EditPlaylistModal({
               </div>
               <input
                 type="file"
+                id="edit-playlist-cover-input"
+                name="playlistCover"
                 ref={fileInputRef}
                 onChange={handleImageChange}
                 accept="image/jpeg,image/jpg"
@@ -1000,11 +1016,13 @@ function EditPlaylistModal({
             {/* Inputs Section */}
             <div className="flex-1 flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-[#B3B3B3]">
+                <label htmlFor="edit-playlist-name" className="text-[10px] font-bold uppercase tracking-wider text-[#B3B3B3]">
                   Name
                 </label>
                 <input
                   type="text"
+                  id="edit-playlist-name"
+                  name="playlistName"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Add a name"
@@ -1014,10 +1032,12 @@ function EditPlaylistModal({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-[#B3B3B3]">
+                <label htmlFor="edit-playlist-desc" className="text-[10px] font-bold uppercase tracking-wider text-[#B3B3B3]">
                   Description
                 </label>
                 <textarea
+                  id="edit-playlist-desc"
+                  name="playlistDesc"
                   value={desc}
                   onChange={(e) => setDesc(e.target.value)}
                   placeholder="Add an optional description"
@@ -1110,6 +1130,7 @@ function Workspace({
   // Lazy rendering: number of rows currently rendered
   const [visibleRowCount, setVisibleRowCount] = useState(LAZY_ROW_STEP);
   const lazyTriggerRef = useRef<HTMLTableRowElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const trackDragItemRef = useRef<string | null>(null);
   const trackDragOverRef = useRef<string | null>(null);
 
@@ -1251,18 +1272,21 @@ function Workspace({
   // IntersectionObserver to load more rows when sentinel is visible
   useEffect(() => {
     const sentinel = lazyTriggerRef.current;
+    const root = tableScrollRef.current || null;
     if (!sentinel) return;
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
           setVisibleRowCount(prev => prev + LAZY_ROW_STEP);
         }
       },
-      { threshold: 0.1 }
+      { root, rootMargin: "200px", threshold: 0 }
     );
+
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [lazyTriggerRef.current]);
+  }, [lazyTriggerRef.current, tableScrollRef.current]);
 
   // Save workspace preferences when they change
   useEffect(() => {
@@ -1794,7 +1818,7 @@ function Workspace({
           </div>
         )}
 
-        <div className={`h-full overflow-auto ${(loadingTracks && playlistTracks.length === 0) ? "opacity-0 pointer-events-none" : ""}`}>
+        <div ref={tableScrollRef} className={`h-full overflow-auto ${(loadingTracks && playlistTracks.length === 0) ? "opacity-0 pointer-events-none" : ""}`}>
           <table className="w-full min-w-[860px] border-collapse">
             <thead className="sticky top-0 z-10 bg-[#121212]">
               <tr className="border-b border-[#282828]">
@@ -2236,9 +2260,11 @@ function EndpointPlayground({ endpoint }: { endpoint: ApiEndpoint }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[#1e1e1e] p-3 rounded-lg border border-white/5">
           {pathParams.map(p => (
             <div key={p} className="flex flex-col gap-1">
-              <label className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Path parameter: {"{" + p + "}"}</label>
+              <label htmlFor={`api-path-param-${p}`} className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Path parameter: {"{" + p + "}"}</label>
               <input
                 type="text"
+                id={`api-path-param-${p}`}
+                name={`pathParam_${p}`}
                 value={paramValues[p] || ""}
                 onChange={e => setParamValues(prev => ({ ...prev, [p]: e.target.value }))}
                 className="bg-[#282828] text-white px-2 py-1 rounded text-xs outline-none border border-transparent focus:border-[#1DB954]/50"
@@ -2247,9 +2273,11 @@ function EndpointPlayground({ endpoint }: { endpoint: ApiEndpoint }) {
           ))}
           {queryParams.map((q: string) => (
             <div key={q} className="flex flex-col gap-1">
-              <label className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Query parameter: {q}</label>
+              <label htmlFor={`api-query-param-${q}`} className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Query parameter: {q}</label>
               <input
                 type="text"
+                id={`api-query-param-${q}`}
+                name={`queryParam_${q}`}
                 value={paramValues[q] || ""}
                 onChange={e => setParamValues(prev => ({ ...prev, [q]: e.target.value }))}
                 className="bg-[#282828] text-white px-2 py-1 rounded text-xs outline-none border border-transparent focus:border-[#1DB954]/50"
@@ -3041,251 +3069,7 @@ function SearchPage({
   );
 }
 
-// ─── Page: All Libraries ────────────────────────────────────────────────────────
 
-function AllLibraries({
-  setPage,
-  playlists,
-  playlistTracks,
-  setSelectedPlaylistId,
-  topArtists,
-  currentPlaybackTrackId,
-  enableDeprecatedApis,
-}: {
-  setPage: (p: Page) => void;
-  playlists: Playlist[];
-  playlistTracks: Track[];
-  selectedPlaylistId: string | number;
-  setSelectedPlaylistId: (id: string | number) => void;
-  topArtists: Artist[];
-  currentPlaybackTrackId: string | null;
-  enableDeprecatedApis: boolean;
-}) {
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"name" | "tracks" | "recent">("name");
-
-  const totalUniqueMs = playlistTracks.reduce((sum, t) => sum + t.durationMs, 0);
-  const totalHours = Math.floor(totalUniqueMs / 3600000);
-  const totalMin = Math.floor((totalUniqueMs % 3600000) / 60000);
-
-  const filteredPlaylists = playlists.filter(pl =>
-    pl.name.toLowerCase().includes(search.toLowerCase()) || pl.desc.toLowerCase().includes(search.toLowerCase())
-  ).sort((a, b) => {
-    if (sortBy === "tracks") return b.tracks - a.tracks;
-    if (sortBy === "name") return a.name.localeCompare(b.name);
-    return String(b.id).localeCompare(String(a.id));
-  });
-
-  const avgBpm = playlistTracks.length > 0 ? Math.round(playlistTracks.reduce((s, t) => s + t.bpm, 0) / playlistTracks.length) : 120;
-
-  return (
-    <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
-      {/* Hero Banner */}
-      <div className="bg-gradient-to-b from-[#0f2a1a] via-[#121212] to-[#121212] px-8 pt-8 pb-6">
-        <div className="flex items-end gap-6 mb-6">
-          <div className="w-[140px] h-[140px] bg-gradient-to-br from-[#1DB954]/40 to-[#1DB954]/10 border border-[#1DB954]/30 rounded-xl flex flex-col items-center justify-center gap-2 shadow-2xl shrink-0">
-            <Library size={44} className="text-[#1DB954]" />
-            <span className="text-[#1DB954] text-[11px] font-bold uppercase tracking-widest">All Songs</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3] mb-1">Conditional Playlist</p>
-            <h1 className="text-white text-[40px] font-extrabold leading-none mb-3">All Libraries</h1>
-            <p className="text-[#B3B3B3] text-[13px] mb-4 max-w-xl">
-              Dynamically compiled from all your playlists and saved tracks. Deduplicated by Spotify Track URI across {playlists.length} sources.
-            </p>
-            <div className="flex items-center gap-5 text-[13px] flex-wrap">
-              <span className="text-white font-semibold">{playlistTracks.length} unique tracks</span>
-              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
-              <span className="text-[#B3B3B3]">{totalHours} hr {totalMin} min</span>
-              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
-              <span className="text-[#B3B3B3]">{playlists.length} source playlists</span>
-              <span className="text-[#B3B3B3] hidden sm:inline">·</span>
-              <span className="text-[#1DB954] flex items-center gap-1 font-semibold"><RefreshCw size={11} /> Synced · just now</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <button onClick={() => {
-              if (playlistTracks.length > 0) {
-                playTrackSequence(playlistTracks, 0)
-                  .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
-              }
-            }} className="w-14 h-14 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer">
-              <Play size={24} className="text-black fill-black ml-0.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Aggregate stats strip */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {[
-            { label: "Source Playlists", value: String(playlists.length), icon: ListMusic, color: "text-blue-400" },
-            { label: "Unique Tracks", value: String(playlistTracks.length), icon: Music2, color: "text-[#1DB954]" },
-            { label: "Unique Artists", value: String(topArtists.length), icon: Mic2, color: "text-purple-400" },
-            { label: "Avg. BPM", value: String(avgBpm), icon: Zap, color: "text-amber-400" },
-            { label: "Sync Status", value: "OK", icon: Check, color: "text-emerald-400" },
-          ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="bg-[#181818] rounded-lg px-4 py-3 border border-[#282828] flex items-center gap-3">
-              <Icon size={18} className={color} />
-              <div>
-                <p className={`text-[20px] font-bold ${color}`}>{value}</p>
-                <p className="text-[#B3B3B3] text-[11px]">{label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 px-8 py-4 border-b border-[#282828] sticky top-0 z-10 bg-[#121212]/95 backdrop-blur-sm">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
-          <input type="text" placeholder="Filter playlists..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 bg-[#282828] rounded text-[13px] text-white placeholder-[#B3B3B3] border border-transparent focus:border-white/20 outline-none" />
-        </div>
-        <div className="flex items-center gap-1 bg-[#282828] rounded p-1 text-[12px]">
-          {(["name", "tracks", "recent"] as const).map(opt => (
-            <button key={opt} onClick={() => setSortBy(opt)}
-              className={`px-3 py-1 rounded capitalize transition-colors font-medium ${sortBy === opt ? "bg-[#383838] text-white" : "text-[#B3B3B3] hover:text-white"}`}>
-              {opt === "recent" ? "Recently Added" : opt}
-            </button>
-          ))}
-        </div>
-        <div className="ml-auto flex items-center gap-1 bg-[#282828] rounded p-1">
-          <button onClick={() => setViewMode("grid")}
-            className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-[#383838] text-white" : "text-[#B3B3B3] hover:text-white"}`}>
-            <Columns3 size={15} />
-          </button>
-          <button onClick={() => setViewMode("list")}
-            className={`p-1.5 rounded transition-colors ${viewMode === "list" ? "bg-[#383838] text-white" : "text-[#B3B3B3] hover:text-white"}`}>
-            <ListMusic size={15} />
-          </button>
-        </div>
-      </div>
-
-      <div className="px-8 py-6">
-        {/* All Songs flat table — a compact preview */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-white text-[16px] font-bold">All Aggregated Tracks</h2>
-            <button onClick={() => setPage("workspace")}
-              className="text-[13px] text-[#1DB954] font-semibold hover:underline flex items-center gap-1">
-              Open in Workspace <ChevronRight size={14} />
-            </button>
-          </div>
-          <div className="bg-[#181818] rounded-lg border border-[#282828] overflow-hidden">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-[#282828]">
-                  <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold w-8">#</th>
-                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">Title</th>
-                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">Artist</th>
-                  <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Album</th>
-                  {enableDeprecatedApis && <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold hidden xl:table-cell">Genre</th>}
-                  {enableDeprecatedApis && <th className="px-3 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">BPM</th>}
-                  <th className="px-3 py-3 text-right text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold"><Clock size={12} className="inline" /></th>
-                </tr>
-              </thead>
-              <tbody>
-                {playlistTracks.map((track, i) => (
-                  <tr key={track.id}
-                    onClick={() => playTrackSequence(playlistTracks, i).catch(() => toast.error("Could not play track."))}
-                    className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${currentPlaybackTrackId === String(track.id) ? "bg-[#1DB954]/10" : i % 2 === 0 ? "" : "bg-[#181818]/60"}`}>
-                    <td className="px-4 py-2.5">
-                      <span className={`text-[12px] font-mono group-hover:hidden ${currentPlaybackTrackId === String(track.id) ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>
-                        {currentPlaybackTrackId === String(track.id) ? (
-                          <Play size={12} className="text-[#1DB954] fill-[#1DB954] inline-block" />
-                        ) : (
-                          i + 1
-                        )}
-                      </span>
-                      <Play size={12} className="text-white fill-white hidden group-hover:block" />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-7 h-7 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
-                          {track.cover ? (
-                            <ImageWithFallback src={track.cover} className="w-full h-full object-cover" alt="" />
-                          ) : (
-                            <Music2 size={11} className="text-[#B3B3B3]" />
-                          )}
-                        </div>
-                        <span className="text-white text-[13px] font-medium truncate max-w-[160px]">{track.title}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[13px]">{track.artist}</td>
-                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[13px] hidden xl:table-cell truncate max-w-[140px]">{track.album}</td>
-                    {enableDeprecatedApis && (
-                      <td className="px-3 py-2.5 hidden xl:table-cell">
-                        <span className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full">{track.genre}</span>
-                      </td>
-                    )}
-                    {enableDeprecatedApis && <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">{track.bpm}</td>}
-                    <td className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono text-right">{track.duration}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Source Playlists */}
-        <div>
-          <h2 className="text-white text-[16px] font-bold mb-4">Source Playlists <span className="text-[#B3B3B3] font-normal text-[14px]">({filteredPlaylists.length})</span></h2>
-          {viewMode === "grid" ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-4">
-              {filteredPlaylists.map(pl => (
-                <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
-                  className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left border border-white/5">
-                  <div className={`relative w-full aspect-square rounded-md overflow-hidden bg-[#282828] shrink-0`}>
-                    {isUrlOrData(pl.cover) ? (
-                      <img src={pl.cover} className="w-full h-full object-cover" alt="" />
-                    ) : (
-                      <div className={`w-full h-full ${pl.cover}`} />
-                    )}
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2">
-                      <div className="w-9 h-9 bg-[#1DB954] rounded-full flex items-center justify-center">
-                        <Play size={14} className="text-black fill-black ml-0.5" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-white font-semibold text-[14px] truncate">{pl.name}</p>
-                    <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">{pl.desc}</p>
-                    <p className="text-[#B3B3B3] text-[11px] mt-1">{getPlaylistTrackCount(pl)} tracks</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-[#181818] rounded-lg border border-[#282828] overflow-hidden">
-              {filteredPlaylists.map((pl, i) => (
-                <button key={pl.id} onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
-                  className={`group w-full flex items-center gap-4 px-4 py-3 hover:bg-[#282828] transition-colors text-left ${i < filteredPlaylists.length - 1 ? "border-b border-[#282828]" : ""}`}>
-                  <div className="w-12 h-12 rounded shrink-0 bg-[#282828] overflow-hidden">
-                    {isUrlOrData(pl.cover) ? (
-                      <img src={pl.cover} className="w-full h-full object-cover" alt="" />
-                    ) : (
-                      <div className={`w-full h-full ${pl.cover}`} />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white text-[14px] font-semibold truncate">{pl.name}</p>
-                    <p className="text-[#B3B3B3] text-[12px] truncate">{pl.desc}</p>
-                  </div>
-                  <span className="text-[#B3B3B3] text-[13px] font-mono shrink-0">{getPlaylistTrackCount(pl)} tracks</span>
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Play size={16} className="text-white fill-white" />
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Library Playlists ────────────────────────────────────────────────────────
 
@@ -3326,6 +3110,7 @@ function LibraryPlaylists({
   selectedPlaylistId,
   setSelectedPlaylistId,
   playingPlaylistId,
+  enableDeprecatedApis,
 }: {
   onOpen: () => void;
   selectedView: "yours" | "all" | "followed";
@@ -3334,6 +3119,7 @@ function LibraryPlaylists({
   selectedPlaylistId: string | number;
   setSelectedPlaylistId: (id: string | number) => void;
   playingPlaylistId: string | number | null;
+  enableDeprecatedApis: boolean;
 }) {
   // Load preferences from cache
   const preferences = loadPreferences();
@@ -3390,9 +3176,10 @@ function LibraryPlaylists({
   }, [customOrder]);
 
   // Filter based on selected view
+  const visiblePlaylists = enableDeprecatedApis ? playlists : playlists.filter(pl => pl.owner !== "followed");
   const filtered = selectedView === "all"
-    ? playlists
-    : playlists.filter(pl => pl.owner === selectedView);
+    ? visiblePlaylists
+    : visiblePlaylists.filter(pl => pl.owner === selectedView);
 
   const uniquePlaylists = Array.from(
     filtered.reduce((map, playlist) => {
@@ -3632,7 +3419,7 @@ function LibraryPlaylists({
               );
             })()}
             {/* All Followed Songs */}
-            {(() => {
+            {enableDeprecatedApis && (() => {
               const isPlaying = playingPlaylistId === "all_followed";
               return (
                 <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
@@ -3751,7 +3538,7 @@ function LibraryPlaylists({
               );
             })()}
             {/* All Followed Songs */}
-            {(() => {
+            {enableDeprecatedApis && (() => {
               const isPlaying = playingPlaylistId === "all_followed";
               return (
                 <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
@@ -3864,7 +3651,7 @@ function LibraryPlaylists({
               );
             })()}
             {/* All Followed Songs */}
-            {(() => {
+            {enableDeprecatedApis && (() => {
               const isPlaying = playingPlaylistId === "all_followed";
               return (
                 <button onClick={() => { setSelectedPlaylistId("all_followed"); onOpen(); }}
@@ -4003,6 +3790,27 @@ export default function App() {
   const [playbackState, setPlaybackState] = useState<any>(null);
   const playbackStateRef = useRef<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const goToAllSongs = useCallback(() => {
+    setSelectedPlaylistId("all_songs");
+    setPage("workspace");
+    setWorkspaceForceFetchToken((t) => t + 1);
+  }, []);
+
+  useEffect(() => {
+    try {
+      (window as any).goToAllSongs = goToAllSongs;
+    } catch (err) {
+      // ignore in non-browser environments
+    }
+    return () => {
+      try {
+        delete (window as any).goToAllSongs;
+      } catch (err) {
+        // ignore
+      }
+    };
+  }, [goToAllSongs]);
 
   useEffect(() => {
     playbackStateRef.current = playbackState;
@@ -4350,6 +4158,7 @@ export default function App() {
           setSelectedPlaylistId={setSelectedPlaylistId}
           currentUser={currentUser}
           playingPlaylistId={playingPlaylistId}
+          enableDeprecatedApis={enableDeprecatedApis}
         />
         <main className="flex-1 min-w-0 relative overflow-hidden flex">
           {page === "dashboard" && (
@@ -4390,18 +4199,6 @@ export default function App() {
           )}
           {page === "api" && <ApiReference enableDeprecatedApis={enableDeprecatedApis} />}
           {page === "search" && <SearchPage topArtists={topArtists} currentPlaybackTrackId={currentPlaybackTrackId} query={searchQuery} setQuery={setSearchQuery} />}
-          {page === "libraries" && (
-            <AllLibraries
-              setPage={setPage}
-              playlists={playlists}
-              playlistTracks={playlistTracks}
-              selectedPlaylistId={selectedPlaylistId}
-              setSelectedPlaylistId={setSelectedPlaylistId}
-              topArtists={topArtists}
-              currentPlaybackTrackId={currentPlaybackTrackId}
-              enableDeprecatedApis={enableDeprecatedApis}
-            />
-          )}
         </main>
       </div>
 
