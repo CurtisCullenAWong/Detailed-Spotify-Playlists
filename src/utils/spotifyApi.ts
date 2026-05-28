@@ -772,6 +772,16 @@ export async function removeTracksFromPlaylist(playlistId: string | number, trac
   });
 }
 
+export async function createPlaylist(
+  userId: string | number,
+  details: { name: string; description?: string; public?: boolean; collaborative?: boolean }
+): Promise<any> {
+  return await spotifyFetch(`/users/${userId}/playlists`, {
+    method: "POST",
+    body: JSON.stringify(details),
+  });
+}
+
 export async function getPlaylistSnapshotId(playlistId: string | number): Promise<string | null> {
   if (playlistId === "liked") return null;
 

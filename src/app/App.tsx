@@ -77,6 +77,7 @@ import {
   setDeprecatedApisEnabled,
   updatePlaylistDetails,
   uploadPlaylistCoverImage,
+  createPlaylist,
 } from "../utils/spotifyApi";
 import Login from "./components/Login";
 import { ImageWithFallback } from "./components/figma/ImageWithFallback";
@@ -910,28 +911,43 @@ const writeWorkspaceTrackCache = (cache: WorkspaceTrackCache) => {
 interface EditPlaylistModalProps {
   isOpen: boolean;
   onClose: () => void;
-  playlist: Playlist;
+  mode: "edit" | "create";
+  playlist?: Playlist;
   setPlaylists: React.Dispatch<React.SetStateAction<Playlist[]>>;
+  currentUserId?: string;
+  trackUrisToAdd?: string[];
 }
 
 function EditPlaylistModal({
   isOpen,
   onClose,
+  mode,
   playlist,
   setPlaylists,
+  currentUserId,
+  trackUrisToAdd = [],
 }: EditPlaylistModalProps) {
-  const [name, setName] = useState(playlist.name);
-  const [desc, setDesc] = useState(playlist.desc);
+  const basePlaylist: Playlist = playlist ?? {
+    id: "new",
+    name: "",
+    desc: "",
+    tracks: 0,
+    cover: "bg-gradient-to-br from-slate-700 to-zinc-900",
+    owner: "yours",
+  };
+
+  const [name, setName] = useState(basePlaylist.name);
+  const [desc, setDesc] = useState(basePlaylist.desc);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync state when playlist changes or modal opens
   useEffect(() => {
-    setName(playlist.name);
-    setDesc(playlist.desc);
+    setName(mode === "create" ? "" : basePlaylist.name);
+    setDesc(mode === "create" ? "" : basePlaylist.desc);
     setImagePreview(null);
-  }, [playlist, isOpen]);
+  }, [basePlaylist.name, basePlaylist.desc, isOpen, mode]);
 
   if (!isOpen) return null;
 
@@ -963,36 +979,73 @@ function EditPlaylistModal({
       return;
     }
 
+    const trimmedDesc = desc.trim();
+
     setIsSaving(true);
     try {
-      // 1. Update playlist details
-      await updatePlaylistDetails(playlist.id, {
-        name: name.trim(),
-        description: desc.trim(),
-      });
+      if (mode === "create") {
+        if (!currentUserId) {
+          toast.error("Missing Spotify user id. Please refresh and try again.");
+          return;
+        }
 
-      // 2. Upload cover image if changed
-      let newCover = playlist.cover;
-      if (imagePreview) {
-        const base64Data = imagePreview.split(",")[1];
-        await uploadPlaylistCoverImage(playlist.id, base64Data);
-        newCover = imagePreview;
+        const created = await createPlaylist(currentUserId, {
+          name: name.trim(),
+          description: trimmedDesc,
+          public: false,
+          collaborative: false,
+        });
+
+        if (imagePreview) {
+          const base64Data = imagePreview.split(",")[1];
+          await uploadPlaylistCoverImage(created.id, base64Data);
+        }
+
+        if (trackUrisToAdd.length > 0) {
+          await addTracksToPlaylist(created.id, trackUrisToAdd);
+        }
+
+        const createdPlaylist: Playlist = {
+          id: created.id,
+          name: created.name || name.trim(),
+          desc: trimmedDesc,
+          tracks: trackUrisToAdd.length,
+          cover: imagePreview || created.images?.[0]?.url || basePlaylist.cover,
+          owner: "yours",
+        };
+
+        setPlaylists(prev => [createdPlaylist, ...prev.filter(p => String(p.id) !== String(createdPlaylist.id))]);
+        toast.success("Playlist created successfully!");
+      } else {
+        // 1. Update playlist details
+        await updatePlaylistDetails(basePlaylist.id, {
+          name: name.trim(),
+          description: trimmedDesc,
+        });
+
+        // 2. Upload cover image if changed
+        let newCover = basePlaylist.cover;
+        if (imagePreview) {
+          const base64Data = imagePreview.split(",")[1];
+          await uploadPlaylistCoverImage(basePlaylist.id, base64Data);
+          newCover = imagePreview;
+        }
+
+        // 3. Update parent state
+        setPlaylists((prev) =>
+          prev.map((p) =>
+            String(p.id) === String(basePlaylist.id)
+              ? { ...p, name: name.trim(), desc: trimmedDesc, cover: newCover }
+              : p
+          )
+        );
+
+        toast.success("Playlist updated successfully!");
       }
-
-      // 3. Update parent state
-      setPlaylists((prev) =>
-        prev.map((p) =>
-          String(p.id) === String(playlist.id)
-            ? { ...p, name: name.trim(), desc: desc.trim(), cover: newCover }
-            : p
-        )
-      );
-
-      toast.success("Playlist updated successfully!");
       onClose();
     } catch (error) {
-      console.error("Error updating playlist details:", error);
-      toast.error("Failed to update playlist details.");
+      console.error(mode === "create" ? "Error creating playlist:" : "Error updating playlist details:", error);
+      toast.error(mode === "create" ? "Failed to create playlist." : "Failed to update playlist details.");
     } finally {
       setIsSaving(false);
     }
@@ -1007,7 +1060,7 @@ function EditPlaylistModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#383838]">
-          <h2 className="text-[18px] font-bold">Edit details</h2>
+          <h2 className="text-[18px] font-bold">{mode === "create" ? "Create playlist" : "Edit details"}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -1028,10 +1081,10 @@ function EditPlaylistModal({
               >
                 {imagePreview ? (
                   <img src={imagePreview} className="w-full h-full object-cover" alt="Preview" />
-                ) : isUrlOrData(playlist.cover) ? (
-                  <img src={playlist.cover} className="w-full h-full object-cover" alt="Cover" />
+                ) : isUrlOrData(basePlaylist.cover) ? (
+                  <img src={basePlaylist.cover} className="w-full h-full object-cover" alt="Cover" />
                 ) : (
-                  <div className={`w-full h-full ${playlist.cover} flex items-center justify-center`}>
+                  <div className={`w-full h-full ${basePlaylist.cover} flex items-center justify-center`}>
                     <Music2 size={40} className="text-white/60" />
                   </div>
                 )}
@@ -1111,10 +1164,10 @@ function EditPlaylistModal({
               {isSaving ? (
                 <>
                   <RefreshCw size={14} className="animate-spin" />
-                  Saving...
+                  {mode === "create" ? "Creating..." : "Saving..."}
                 </>
               ) : (
-                "Save"
+                mode === "create" ? "Create" : "Save"
               )}
             </button>
           </div>
@@ -1127,6 +1180,7 @@ function EditPlaylistModal({
 function Workspace({
   playlists,
   setPlaylists,
+  currentUserId,
   selectedPlaylistId,
   playlistTracks,
   loadingTracks,
@@ -1141,6 +1195,7 @@ function Workspace({
 }: {
   playlists: Playlist[];
   setPlaylists: React.Dispatch<React.SetStateAction<Playlist[]>>;
+  currentUserId?: string;
   selectedPlaylistId: string | number;
   setSelectedPlaylistId: (id: string | number) => void;
   playlistTracks: Track[];
@@ -1158,6 +1213,8 @@ function Workspace({
 
   const [search, setSearch] = useState(preferences.workspaceSearch);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createModalTrackUris, setCreateModalTrackUris] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>(preferences.workspaceGroupBy);
   const [sortKey, setSortKey] = useState<SortKey>(preferences.workspaceSortKey as SortKey);
   const [sortDir, setSortDir] = useState<SortDir>(preferences.workspaceSortDir);
@@ -1494,9 +1551,13 @@ function Workspace({
       const start = Math.min(lastClickedIndexRef.current, idx);
       const end = Math.max(lastClickedIndexRef.current, idx);
       const idsInRange = sorted.slice(start, end + 1).map(t => t.id);
+      const isRangeFullySelected = idsInRange.every(trackId => selected.has(trackId));
       setSelected(prev => {
         const next = new Set(prev);
-        idsInRange.forEach(i => next.add(i));
+        idsInRange.forEach(trackId => {
+          if (isRangeFullySelected) next.delete(trackId);
+          else next.add(trackId);
+        });
         return next;
       });
     } else if (e.ctrlKey || e.metaKey) {
@@ -1546,6 +1607,13 @@ function Workspace({
       console.error(err);
       toast.error("Failed to add tracks. Make sure you own the destination playlist.");
     }
+  };
+
+  const handleCreatePlaylist = () => {
+    const selectedIds = Array.from(selected);
+    setCreateModalTrackUris(selectedIds.map(id => `spotify:track:${id}`));
+    setPlaylistFlyoutOpen(false);
+    setIsCreateModalOpen(true);
   };
 
   const handleDelete = async () => {
@@ -1835,6 +1903,19 @@ function Workspace({
                   <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
                 </div>
                 <div className="max-h-52 overflow-y-auto py-1">
+                  <button
+                    type="button"
+                    onClick={handleCreatePlaylist}
+                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer border-b border-[#383838]"
+                  >
+                    <div className="w-8 h-8 rounded shrink-0 bg-[#1DB954] flex items-center justify-center text-black font-bold">
+                      <Plus size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-white text-[13px] font-medium truncate">Create New Playlist</p>
+                      <p className="text-[#B3B3B3] text-[11px]">Start a new playlist with these tracks</p>
+                    </div>
+                  </button>
                   {playlists.filter(pl => pl.owner === "yours").length === 0 ? (
                     <div className="px-4 py-3 text-xs text-[#888888]">No playlists owned by you.</div>
                   ) : (
@@ -1946,11 +2027,14 @@ function Workspace({
                             <tr
                               key={trackKey}
                               draggable={canReorderTracks}
+                              onMouseDown={(e) => {
+                                if (e.shiftKey) e.preventDefault();
+                              }}
                               onDragStart={() => handleTrackDragStart(trackKey)}
                               onDragEnter={() => handleTrackDragEnter(trackKey)}
                               onDragEnd={handleTrackDragEnd}
                               onDragOver={(e) => e.preventDefault()}
-                              className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
+                              className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer select-none ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
                                 }`}
                               onClick={(e) => handleRowClick(e, track.id)}
                             >
@@ -2216,10 +2300,20 @@ function Workspace({
         <EditPlaylistModal
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
+          mode="edit"
           playlist={activePlaylist}
           setPlaylists={setPlaylists}
         />
       )}
+
+      <EditPlaylistModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        mode="create"
+        setPlaylists={setPlaylists}
+        currentUserId={currentUserId}
+        trackUrisToAdd={createModalTrackUris}
+      />
     </div>
   );
 }
@@ -4302,6 +4396,7 @@ export default function App() {
             <Workspace
               playlists={playlists}
               setPlaylists={setPlaylists}
+              currentUserId={currentUser?.id}
               selectedPlaylistId={selectedPlaylistId}
               setSelectedPlaylistId={setSelectedPlaylistId}
               playlistTracks={playlistTracks}
