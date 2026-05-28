@@ -182,9 +182,9 @@ function Sidebar({
 
   if (collapsed) {
     return (
-      <aside className="hidden md:flex flex-col h-full w-[60px] shrink-0 bg-[#000000] select-none items-center py-4 gap-2 overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
-        <button onClick={onToggleCollapse} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.06] border border-white/10 mb-2 shrink-0 hover:scale-105 transition-all overflow-hidden">
-          <img src="/favicon.png" alt="Logo" className="w-5 h-5 object-contain" />
+      <aside className="hidden md:flex flex-col h-full w-[60px] shrink-0 bg-[#121212] border-r border-[#282828] select-none items-center py-4 gap-2 overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <button onClick={onToggleCollapse} aria-label="Toggle sidebar" className="w-9 h-9 flex items-center justify-center mb-2 shrink-0 hover:scale-105 transition-all overflow-hidden">
+          <img src="/favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
         </button>
         {NAV.map(({ icon: Icon, label, id }) => (
           <button key={label} onClick={() => setPage(id)} title={label}
@@ -253,12 +253,12 @@ function Sidebar({
   }
 
   return (
-    <aside className="hidden md:flex flex-col h-full w-[260px] shrink-0 bg-[#000000] select-none overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <aside className="hidden md:flex flex-col h-full w-[260px] shrink-0 bg-[#121212] border-r border-[#282828] select-none overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Brand */}
-      <div className="px-6 pt-6 pb-4">
+      <div className="px-4 pt-4 pb-3">
         <div className="flex items-center gap-2">
-          <button onClick={onToggleCollapse} className="w-8 h-8 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center shrink-0 hover:scale-105 transition-all overflow-hidden">
-            <img src="/favicon.png" alt="Logo" className="w-4 h-4 object-contain" />
+          <button onClick={onToggleCollapse} aria-label="Toggle sidebar" className="w-8 h-8 flex items-center justify-center shrink-0 hover:scale-105 transition-all overflow-hidden">
+            <img src="/favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
           </button>
           <span className="text-white font-bold text-[15px] tracking-tight">Spotify Manager</span>
           <button onClick={onToggleCollapse} className="ml-auto text-[#B3B3B3] hover:text-white transition-colors p-1 rounded hover:bg-[#282828]">
@@ -279,8 +279,8 @@ function Sidebar({
       </nav>
 
       {/* Library Panel */}
-      <div className="mt-4 mx-3 rounded-lg bg-[#121212] flex-1 overflow-hidden flex flex-col">
-        <div ref={libraryDropdownRef} className="flex items-center gap-1 px-2 py-2 relative">
+      <div className="mt-2 pt-2 border-t border-[#282828] flex-1 overflow-hidden flex flex-col min-h-0">
+        <div ref={libraryDropdownRef} className="flex items-center gap-1 px-4 py-2 relative">
           <button
             onClick={() => setLibraryDropdownOpen(o => !o)}
             className="flex items-center gap-1 flex-1 min-w-0 text-[#B3B3B3] hover:text-white transition-colors group">
@@ -324,8 +324,7 @@ function Sidebar({
         />
 
         {/* API Reference link */}
-        <div className="px-3 pb-2">
-          <div className="h-px bg-[#282828] mb-2" />
+        <div className="px-4 pb-3 pt-2 border-t border-[#282828] mt-auto">
           <button onClick={() => setPage("api")}
             className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${page === "api" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
             <Code2 size={14} />
@@ -689,6 +688,31 @@ const sameTrackOrder = (left: string[], right: string[]) =>
 
 const getTrackOrderKey = (track: Track) => track.rowKey ?? String(track.id);
 
+const getPlaylistTrackCount = (playlist: Playlist) => {
+  const tracks = playlist.tracks as unknown;
+
+  if (typeof tracks === "number") {
+    return Number.isFinite(tracks) ? tracks : 0;
+  }
+
+  if (typeof tracks === "string") {
+    const parsed = Number(tracks);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  if (tracks && typeof tracks === "object") {
+    const trackData = tracks as { total?: unknown; count?: unknown };
+    if (typeof trackData.total === "number" && Number.isFinite(trackData.total)) {
+      return trackData.total;
+    }
+    if (typeof trackData.count === "number" && Number.isFinite(trackData.count)) {
+      return trackData.count;
+    }
+  }
+
+  return 0;
+};
+
 const applyTrackOrder = (tracks: Track[], trackOrder: string[]) => {
   const trackMap = new Map(tracks.map(track => [getTrackOrderKey(track), track] as const));
   const ordered = trackOrder.map(id => trackMap.get(id)).filter(Boolean) as Track[];
@@ -731,7 +755,9 @@ function Workspace({
   loadingTracks,
   loadingTracksProgress,
   setPlaylistTracks,
+  likedSongsCount,
   setLikedSongsCount,
+  onForceCompleteFetch,
   currentPlaybackTrackId,
   enableDeprecatedApis,
 }: {
@@ -744,6 +770,7 @@ function Workspace({
   setPlaylistTracks: React.Dispatch<React.SetStateAction<Track[]>>;
   likedSongsCount: number;
   setLikedSongsCount: React.Dispatch<React.SetStateAction<number>>;
+  onForceCompleteFetch: () => void;
   currentPlaybackTrackId: string | null;
   enableDeprecatedApis: boolean;
 }) {
@@ -759,6 +786,7 @@ function Workspace({
   const [playlistFlyoutOpen, setPlaylistFlyoutOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [trackOrders, setTrackOrders] = useState<Record<string, string[]>>(preferences.workspaceTrackOrders);
+  const [isSavingTrackOrder, setIsSavingTrackOrder] = useState(false);
   // Lazy rendering: number of rows currently rendered
   const [visibleRowCount, setVisibleRowCount] = useState(LAZY_ROW_STEP);
   const lazyTriggerRef = useRef<HTMLTableRowElement>(null);
@@ -772,9 +800,11 @@ function Workspace({
   const dragOverColRef = useRef<ColId | null>(null);
 
   const DEPRECATED_COLUMNS = React.useMemo(() => new Set<ColId>([
-    "genre", "bpm", "energy", "danceability", "valence",
+    "genre", "bpm", "energy", "popularity", "danceability", "valence",
     "acousticness", "instrumentalness", "speechiness", "liveness", "loudness"
   ]), []);
+
+  const GROUPABLE_COLUMNS = React.useMemo(() => ALL_COLUMNS.filter((column) => column.groupable), []);
 
   const activeColumnsCount = React.useMemo(() => {
     return columnOrder
@@ -795,7 +825,18 @@ function Workspace({
     }
   }, [enableDeprecatedApis, sortKey, groupBy, DEPRECATED_COLUMNS]);
 
-  const activePlaylist = playlists.find(p => p.id === selectedPlaylistId);
+  useEffect(() => {
+    if (groupBy === "none") return;
+    const groupedColumn = groupBy as ColId;
+    if (visibleCols.has(groupedColumn)) return;
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      next.add(groupedColumn);
+      return next;
+    });
+  }, [groupBy, visibleCols]);
+
+  const activePlaylist = playlists.find(p => String(p.id) === String(selectedPlaylistId));
   const currentPlaylistKey = String(selectedPlaylistId);
   const playlistName =
     selectedPlaylistId === "liked" ? "Liked Songs" :
@@ -815,6 +856,17 @@ function Workspace({
         selectedPlaylistId === "all_followed" ? "bg-gradient-to-br from-purple-600 to-violet-700" :
           selectedPlaylistId === "all_songs" ? "bg-gradient-to-br from-emerald-600 to-teal-700" :
             activePlaylist?.cover || "";
+  const playlistTotalTracks =
+    selectedPlaylistId === "liked"
+      ? likedSongsCount
+      : activePlaylist
+        ? getPlaylistTrackCount(activePlaylist)
+        : playlistTracks.length;
+  const isCompiledVirtualPlaylist = selectedPlaylistId === "all_my" || selectedPlaylistId === "all_followed" || selectedPlaylistId === "all_songs";
+  const playlistCountLabel =
+    typeof playlistTotalTracks === "number" && playlistTotalTracks >= 0
+      ? `${playlistTracks.length.toLocaleString()} / ${playlistTotalTracks.toLocaleString()} tracks`
+      : `${playlistTracks.length.toLocaleString()} tracks`;
   const isYours = (selectedPlaylistId === "liked" || activePlaylist?.owner === "yours") && selectedPlaylistId !== "all_my" && selectedPlaylistId !== "all_followed" && selectedPlaylistId !== "all_songs";
   const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
   const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
@@ -915,6 +967,7 @@ function Workspace({
   }, [columnsOpen]);
 
   const toggleColVisibility = (id: ColId) => {
+    if (groupBy !== "none" && groupBy === id) return;
     setVisibleCols(prev => {
       const next = new Set(prev);
       if (next.has(id) && next.size === 1) return prev;
@@ -999,6 +1052,7 @@ function Workspace({
   const handleSavePlaylistOrder = async () => {
     if (!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0) return;
 
+    setIsSavingTrackOrder(true);
     try {
       const snapshotId = await getPlaylistSnapshotId(selectedPlaylistId);
       await reorderPlaylistTracks(selectedPlaylistId, initialTrackOrder, targetTrackOrder, snapshotId);
@@ -1024,6 +1078,8 @@ function Workspace({
     } catch (err) {
       console.error(err);
       toast.error("Failed to save playlist sequence.");
+    } finally {
+      setIsSavingTrackOrder(false);
     }
   };
 
@@ -1191,7 +1247,18 @@ function Workspace({
             <p className="text-[#B3B3B3] text-[12px] md:text-[13px] mb-2 md:mb-3 hidden sm:block">{playlistDesc}</p>
             <div className="flex items-center gap-2 md:gap-4 text-[11px] md:text-[13px] flex-wrap">
               <span className="text-white font-semibold flex items-center gap-2">
-                {playlistTracks.length} tracks
+                {playlistCountLabel}
+                {(typeof playlistTotalTracks === "number" || isCompiledVirtualPlaylist) && (
+                  <button
+                    type="button"
+                    onClick={onForceCompleteFetch}
+                    disabled={loadingTracks}
+                    title={isCompiledVirtualPlaylist ? "Refresh compiled playlist tracks from Spotify" : "Fetch complete playlist data from Spotify"}
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${loadingTracks ? "cursor-not-allowed border-white/10 text-[#535353]" : "border-white/20 text-[#B3B3B3] hover:text-white hover:border-white/40"}`}
+                  >
+                    <RefreshCw size={11} className={loadingTracks ? "animate-spin" : ""} />
+                  </button>
+                )}
                 {loadingTracks && (
                   <div className="w-3 h-3 rounded-full border-2 border-[#1DB954] border-t-transparent animate-spin" title="Fetching tracks..."></div>
                 )}
@@ -1201,16 +1268,18 @@ function Workspace({
           <div className="flex items-center gap-2 md:gap-3 shrink-0">
             <button
               onClick={handleSavePlaylistOrder}
-              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0}
+              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
               title={!canSortPlaylist
                 ? "Only playlists you own can be saved back to Spotify"
+                : isSavingTrackOrder
+                  ? "Sorting playlist..."
                 : !hasUnsavedTrackOrder
                   ? "Playlist sequence is already in sync"
                   : "Save the current track order to Spotify"}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer border ${hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border ${isSavingTrackOrder ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" : hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20 cursor-pointer" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
             >
-              <RefreshCw size={13} className={hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
-              Sort Playlist
+              <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
+              {isSavingTrackOrder ? "Sorting..." : hasUnsavedTrackOrder ? "Save Sort" : "Playlist Sorted"}
             </button>
             <button
               onClick={() => {
@@ -1244,15 +1313,25 @@ function Workspace({
           </button>
           {groupByOpen && (
             <div className="absolute top-full left-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
-              {(Object.entries(GROUP_BY_LABELS) as [GroupBy, string][])
-                .filter(([opt]) => enableDeprecatedApis || opt !== "genre")
-                .map(([opt, label]) => (
-                  <button key={opt} onClick={() => { setGroupBy(opt); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === opt ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
-                    {label}
-                    {groupBy === opt && <Check size={12} />}
-                  </button>
-                ))}
+              <button
+                onClick={() => { setGroupBy("none"); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+              >
+                {GROUP_BY_LABELS.none}
+                {groupBy === "none" && <Check size={12} />}
+              </button>
+              {GROUPABLE_COLUMNS
+                .filter((column) => enableDeprecatedApis || column.id !== "genre")
+                .map((column) => {
+                  const option = column.id as GroupBy;
+                  return (
+                    <button key={option} onClick={() => { setGroupBy(option); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                      className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === option ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+                      {column.label}
+                      {groupBy === option && <Check size={12} />}
+                    </button>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -1274,7 +1353,8 @@ function Workspace({
                 <div className="max-h-60 overflow-y-auto py-1">
                   {ALL_COLUMNS.filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId)).map(col => (
                     <button key={col.id} onClick={() => toggleColVisibility(col.id as ColId)}
-                      className="w-full flex items-center justify-between px-4 py-2 text-[13px] hover:bg-[#383838] transition-colors cursor-pointer text-left">
+                      disabled={groupBy !== "none" && groupBy === col.id}
+                      className={`w-full flex items-center justify-between px-4 py-2 text-[13px] transition-colors text-left ${groupBy !== "none" && groupBy === col.id ? "cursor-not-allowed bg-[#1DB954]/10" : "hover:bg-[#383838] cursor-pointer"}`}>
                       <span className={visibleCols.has(col.id as ColId) ? "text-white" : "text-[#535353]"}>{col.label}</span>
                       {visibleCols.has(col.id as ColId) && <Check size={12} className="text-[#1DB954]" />}
                     </button>
@@ -1324,7 +1404,7 @@ function Workspace({
                         </div>
                         <div className="min-w-0">
                           <p className="text-white text-[13px] font-medium truncate">{pl.name}</p>
-                          <p className="text-[#B3B3B3] text-[11px]">{pl.tracks} tracks</p>
+                          <p className="text-[#B3B3B3] text-[11px]">{getPlaylistTrackCount(pl)} tracks</p>
                         </div>
                       </button>
                     ))
@@ -2493,7 +2573,7 @@ function SearchPage({ topArtists, currentPlaybackTrackId }: { topArtists: Artist
                       </div>
                       <div className="min-w-0">
                         <p className="text-white text-[13px] font-semibold truncate">{pl.name}</p>
-                        <p className="text-[#B3B3B3] text-[12px] truncate">Playlist · {pl.tracks} tracks</p>
+                        <p className="text-[#B3B3B3] text-[12px] truncate">Playlist · {getPlaylistTrackCount(pl)} tracks</p>
                       </div>
                     </button>
                   ))}
@@ -2708,7 +2788,7 @@ function AllLibraries({
                   <div className="min-w-0">
                     <p className="text-white font-semibold text-[14px] truncate">{pl.name}</p>
                     <p className="text-[#B3B3B3] text-[12px] mt-0.5 truncate">{pl.desc}</p>
-                    <p className="text-[#B3B3B3] text-[11px] mt-1">{pl.tracks} tracks</p>
+                    <p className="text-[#B3B3B3] text-[11px] mt-1">{getPlaylistTrackCount(pl)} tracks</p>
                   </div>
                 </button>
               ))}
@@ -2729,7 +2809,7 @@ function AllLibraries({
                     <p className="text-white text-[14px] font-semibold truncate">{pl.name}</p>
                     <p className="text-[#B3B3B3] text-[12px] truncate">{pl.desc}</p>
                   </div>
-                  <span className="text-[#B3B3B3] text-[13px] font-mono shrink-0">{pl.tracks} tracks</span>
+                  <span className="text-[#B3B3B3] text-[13px] font-mono shrink-0">{getPlaylistTrackCount(pl)} tracks</span>
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                     <Play size={16} className="text-white fill-white" />
                   </div>
@@ -2745,9 +2825,34 @@ function AllLibraries({
 
 // ─── Library Playlists ────────────────────────────────────────────────────────
 
-type PlSortKey = "none" | "name" | "tracks";
-type PlGroupKey = "none" | "size";
+type PlSortKey = "none" | "name" | "tracks" | "owner";
+type PlGroupKey = "none" | "size" | "owner";
 type ViewSize = "large" | "medium" | "small";
+
+const PLAYLIST_SORT_OPTIONS: Array<{ key: Exclude<PlSortKey, "none">; label: string }> = [
+  { key: "name", label: "Name" },
+  { key: "tracks", label: "Track count" },
+  { key: "owner", label: "Owner" },
+];
+
+const PLAYLIST_GROUP_OPTIONS: Array<{ key: Exclude<PlGroupKey, "none">; label: string }> = [
+  { key: "size", label: "By Size" },
+  { key: "owner", label: "By Owner" },
+];
+
+const getPlaylistOwnerLabel = (owner: Playlist["owner"]) => owner === "yours" ? "My Playlists" : "Followed Playlists";
+
+const getPlaylistSortValue = (playlist: Playlist, key: Exclude<PlSortKey, "none">) => {
+  if (key === "name") return playlist.name;
+  if (key === "tracks") return getPlaylistTrackCount(playlist);
+  return playlist.owner === "yours" ? 0 : 1;
+};
+
+const getPlaylistGroupLabel = (playlist: Playlist, key: Exclude<PlGroupKey, "none">) => {
+  const trackCount = getPlaylistTrackCount(playlist);
+  if (key === "size") return trackCount < 40 ? "Small" : trackCount < 80 ? "Medium" : "Large";
+  return getPlaylistOwnerLabel(playlist.owner);
+};
 
 function LibraryPlaylists({
   onOpen,
@@ -2810,9 +2915,19 @@ function LibraryPlaylists({
     ? playlists
     : playlists.filter(pl => pl.owner === selectedView);
 
+  const uniquePlaylists = Array.from(
+    filtered.reduce((map, playlist) => {
+      const key = String(playlist.id);
+      if (!map.has(key)) {
+        map.set(key, playlist);
+      }
+      return map;
+    }, new Map<string, Playlist>()).values()
+  );
+
   // Apply custom order if no sorting is active
   const reordered = sortKey === "none" && customOrder.length > 0
-    ? [...filtered].sort((a, b) => {
+    ? [...uniquePlaylists].sort((a, b) => {
       const aIdx = customOrder.indexOf(String(a.id));
       const bIdx = customOrder.indexOf(String(b.id));
       if (aIdx === -1 && bIdx === -1) return 0;
@@ -2820,23 +2935,21 @@ function LibraryPlaylists({
       if (bIdx === -1) return -1;
       return aIdx - bIdx;
     })
-    : filtered;
+    : uniquePlaylists;
 
   const sorted = sortKey === "none" ? reordered : [...reordered].sort((a, b) => {
-    const va = sortKey === "name" ? a.name : a.tracks;
-    const vb = sortKey === "name" ? b.name : b.tracks;
+    const va = getPlaylistSortValue(a, sortKey);
+    const vb = getPlaylistSortValue(b, sortKey);
     const cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
     return sortDir === "asc" ? cmp : -cmp;
   });
-
-  const sizeLabel = (n: number) => n < 40 ? "Small" : n < 80 ? "Medium" : "Large";
 
   type Group = { label: string; items: Playlist[] };
   const grouped: Group[] = groupKey === "none"
     ? [{ label: "", items: sorted }]
     : Array.from(
       sorted.reduce((map, pl) => {
-        const key = sizeLabel(pl.tracks);
+        const key = getPlaylistGroupLabel(pl, groupKey);
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(pl);
         return map;
@@ -2898,20 +3011,20 @@ function LibraryPlaylists({
   return (
     <div className="flex flex-col flex-1 min-h-0 px-2 pt-2 pb-2">
       {/* toolbar */}
-      <div className="flex items-center gap-1 px-2 pb-2">
+      <div className="grid grid-cols-2 gap-2 px-2 pb-2">
         {/* Group by */}
-        <div ref={groupRef} className="relative">
+        <div ref={groupRef} className="relative min-w-0">
           <button onClick={() => setGroupOpen(o => !o)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${groupKey !== "none" ? "text-[#1DB954]" : "text-[#B3B3B3] hover:text-white"}`}>
+            className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${groupKey !== "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
             <Library size={11} />
             {groupKey !== "none" ? "Grouped" : "Group"}
           </button>
           {groupOpen && (
-            <div className="absolute top-full left-0 mt-1 w-36 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
-              {(["none", "size"] as PlGroupKey[]).map(opt => (
+            <div className="absolute top-full left-0 mt-1 w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+              {(["none", ...PLAYLIST_GROUP_OPTIONS.map(option => option.key)] as PlGroupKey[]).map(opt => (
                 <button key={opt} onClick={() => { setGroupKey(opt); setGroupOpen(false); }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] capitalize hover:bg-[#383838] transition-colors ${groupKey === opt ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
-                  {opt === "none" ? "None" : "By Size"}
+                  {opt === "none" ? "None" : PLAYLIST_GROUP_OPTIONS.find(option => option.key === opt)?.label}
                   {groupKey === opt && <Check size={10} />}
                 </button>
               ))}
@@ -2920,18 +3033,18 @@ function LibraryPlaylists({
         </div>
 
         {/* Sort by */}
-        <div ref={sortRef} className="relative">
+        <div ref={sortRef} className="relative min-w-0">
           <button onClick={() => setSortOpen(o => !o)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${sortKey !== "none" ? "text-[#1DB954]" : "text-[#B3B3B3] hover:text-white"}`}>
+            className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${sortKey !== "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
             <ArrowUpDown size={11} />
             <span>Sort</span>
           </button>
           {sortOpen && (
-            <div className="absolute top-full left-0 mt-1 w-36 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
-              {(["none", "name", "tracks"] as PlSortKey[]).map(opt => (
+            <div className="absolute top-full left-0 mt-1 w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-40 py-1">
+              {(["none", ...PLAYLIST_SORT_OPTIONS.map(option => option.key)] as PlSortKey[]).map(opt => (
                 <button key={opt} onClick={() => { toggleSort(opt); setSortOpen(false); }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] hover:bg-[#383838] transition-colors ${sortKey === opt ? "text-[#1DB954]" : "text-[#B3B3B3]"}`}>
-                  {opt === "none" ? "None" : opt === "name" ? "Name" : "Track count"}
+                  {opt === "none" ? "None" : PLAYLIST_SORT_OPTIONS.find(option => option.key === opt)?.label}
                   {sortKey === opt && opt !== "none" && <span className="font-mono text-[11px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
                   {sortKey === opt && opt === "none" && <Check size={10} />}
                 </button>
@@ -3063,7 +3176,7 @@ function LibraryPlaylists({
                 </div>
                 <div className="min-w-0">
                   <p className="text-white text-[12px] font-semibold truncate">{pl.name}</p>
-                  <p className="text-[#B3B3B3] text-[10px]">{pl.tracks} tracks</p>
+                  <p className="text-[#B3B3B3] text-[10px]">{getPlaylistTrackCount(pl)} tracks</p>
                 </div>
               </button>
             ))}
@@ -3156,7 +3269,7 @@ function LibraryPlaylists({
               </div>
               <div className="min-w-0">
                 <p className="text-white text-[13px] truncate">All My Songs</p>
-                <p className="text-[#B3B3B3] text-[11px]">Compiled Virtual Playlist</p>
+                <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTracks.length.toLocaleString()} tracks</p>
               </div>
             </button>
             {/* All Followed Songs */}
@@ -3167,7 +3280,7 @@ function LibraryPlaylists({
               </div>
               <div className="min-w-0">
                 <p className="text-white text-[13px] truncate">All Followed Songs</p>
-                <p className="text-[#B3B3B3] text-[11px]">Compiled Virtual Playlist</p>
+                <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTracks.length.toLocaleString()} tracks</p>
               </div>
             </button>
             {/* All Songs */}
@@ -3178,7 +3291,7 @@ function LibraryPlaylists({
               </div>
               <div className="min-w-0">
                 <p className="text-white text-[13px] truncate">All Songs</p>
-                <p className="text-[#B3B3B3] text-[11px]">Compiled Virtual Playlist</p>
+                <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTracks.length.toLocaleString()} tracks</p>
               </div>
             </button>
             {grouped.map(({ label, items }) => (
@@ -3206,7 +3319,7 @@ function LibraryPlaylists({
                     </div>
                     <div className="min-w-0">
                       <p className="text-white text-[13px] truncate">{pl.name}</p>
-                      <p className="text-[#B3B3B3] text-[11px]">Playlist · {pl.tracks} tracks</p>
+                      <p className="text-[#B3B3B3] text-[11px]">Playlist · {getPlaylistTrackCount(pl)} tracks</p>
                     </div>
                   </button>
                 ))}
@@ -3268,6 +3381,7 @@ export default function App() {
   const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
   const [loadingTracks, setLoadingTracks] = useState<boolean>(false);
   const [loadingTracksProgress, setLoadingTracksProgress] = useState<number>(0);
+  const [workspaceForceFetchToken, setWorkspaceForceFetchToken] = useState(0);
   const [playbackState, setPlaybackState] = useState<any>(null);
   const playbackStateRef = useRef<any>(null);
 
@@ -3277,6 +3391,7 @@ export default function App() {
 
   const playlistTrackCacheRef = useRef<WorkspaceTrackCache>(readWorkspaceTrackCache());
   const workspaceLoadSessionRef = useRef(0);
+  const lastConsumedForceFetchTokenRef = useRef(0);
   // Feature flag: deprecated Spotify endpoints (audio-features, artists/genre)
   const [enableDeprecatedApis, setEnableDeprecatedApis] = useState<boolean>(
     () => loadPreferences().enableDeprecatedApis
@@ -3404,9 +3519,13 @@ export default function App() {
     };
 
     const loadTracks = async () => {
+      const forceRefreshRequested = workspaceForceFetchToken !== lastConsumedForceFetchTokenRef.current;
+      if (forceRefreshRequested) {
+        lastConsumedForceFetchTokenRef.current = workspaceForceFetchToken;
+      }
       const cacheKey = String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic");
       const cachedTracks = playlistTrackCacheRef.current[cacheKey];
-      if (cachedTracks) {
+      if (cachedTracks?.length && !forceRefreshRequested) {
         if (workspaceLoadSessionRef.current === loadSession) {
           setLoadingTracks(false);
         }
@@ -3454,7 +3573,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [authenticated, page, selectedPlaylistId, playlists, enableDeprecatedApis]);
+  }, [authenticated, page, selectedPlaylistId, playlists, enableDeprecatedApis, workspaceForceFetchToken]);
 
   // Player state polling (visibility-aware, adaptive interval, and playback-action triggered)
   useEffect(() => {
@@ -3467,18 +3586,26 @@ export default function App() {
       // Don't poll if the tab is hidden
       if (document.hidden) return;
 
+      let nextState: any = null;
       try {
-        const state = await getPlayerState();
+        nextState = await getPlayerState();
         if (isActive) {
-          setPlaybackState(state);
+          setPlaybackState(nextState);
         }
       } catch (err) {
         console.debug("Active player state polling error (Spotify might be idle):", err);
       } finally {
         if (isActive) {
-          // Schedule next poll based on whether playback is active
-          const isPlaying = playbackStateRef.current?.is_playing === true;
-          // 4 seconds when playing, 15 seconds when paused/idle
+          // Stop the polling loop when Spotify returns 204 No Content.
+          // Resume via visibility change or playback-triggered events.
+          if (nextState === null) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+            return;
+          }
+
+          // Schedule next poll based on whether playback is active.
+          const isPlaying = nextState?.is_playing === true;
           const delay = isPlaying ? 4000 : 15000;
           timeoutId = setTimeout(pollPlayerState, delay);
         }
@@ -3574,6 +3701,7 @@ export default function App() {
               setPlaylistTracks={updatePlaylistTracks}
               likedSongsCount={likedSongsCount}
               setLikedSongsCount={setLikedSongsCount}
+              onForceCompleteFetch={() => setWorkspaceForceFetchToken(v => v + 1)}
               currentPlaybackTrackId={currentPlaybackTrackId}
               enableDeprecatedApis={enableDeprecatedApis}
             />

@@ -55,6 +55,29 @@ function buildRequestKey(url: string, options: RequestInit): string {
   return `${method} ${url} ${body}`;
 }
 
+function readPlaylistTrackTotal(tracks: unknown): number {
+  if (typeof tracks === "number") {
+    return Number.isFinite(tracks) ? tracks : 0;
+  }
+
+  if (typeof tracks === "string") {
+    const parsed = Number(tracks);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  if (tracks && typeof tracks === "object") {
+    const trackData = tracks as { total?: unknown; count?: unknown };
+    if (typeof trackData.total === "number" && Number.isFinite(trackData.total)) {
+      return trackData.total;
+    }
+    if (typeof trackData.count === "number" && Number.isFinite(trackData.count)) {
+      return trackData.count;
+    }
+  }
+
+  return 0;
+}
+
 // --- API Fetch Wrapper with 401 Auto-Retry + 429 Exponential Backoff ---
 
 export async function spotifyFetch(path: string, options: RequestInit = {}): Promise<any> {
@@ -372,7 +395,7 @@ export async function getUserPlaylists(currentUserId: string): Promise<Playlist[
       id: pl.id,
       name: pl.name || "Untitled Playlist",
       desc: pl.description || "No description",
-      tracks: pl.tracks?.total ?? 0,
+      tracks: readPlaylistTrackTotal(pl.tracks),
       cover: pl.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
       owner: pl.owner?.id === currentUserId ? "yours" : "followed",
     }),
@@ -409,6 +432,8 @@ export async function getRawPlaylistTracks(
   signal?: AbortSignal,
   onChunk?: (items: any[]) => Promise<void> | void
 ): Promise<any[]> {
+  const resolvePlaylistTrack = (entry: any) => entry?.track ?? entry?.item ?? null;
+
   if (playlistId === "liked") {
     let totalAdded = 0;
     const seen = new Set<string>();
@@ -444,8 +469,9 @@ export async function getRawPlaylistTracks(
     const items = await fetchAllPages<any>(
       `/playlists/${playlistId}/items?limit=50`,
       (i) => {
-        if (!i.track) return null as any; // will be filtered below
-        return { ...i.track, added_at: i.added_at };
+        const track = resolvePlaylistTrack(i);
+        if (!track) return null as any; // will be filtered below
+        return { ...track, added_at: i.added_at };
       },
       150,
       onProgress,
@@ -606,7 +632,7 @@ export async function searchSpotify(query: string): Promise<{
     id: p.id,
     name: p.name,
     desc: p.description || "",
-    tracks: p.tracks.total,
+    tracks: readPlaylistTrackTotal(p.tracks),
     cover: p.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
     owner: "yours" as const, // Default search playlists as yours
   })) || [];

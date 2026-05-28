@@ -14,14 +14,15 @@ export interface NavItem {
 export interface ColumnDefinition {
   id: "title" | "artist" | "album" | "genre" | "releaseYear" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
   label: string;
+  groupable?: boolean;
 }
 
 export const ALL_COLUMNS: ColumnDefinition[] = [
   { id: "title", label: "Title" },
-  { id: "artist", label: "Artist" },
-  { id: "album", label: "Album" },
-  { id: "genre", label: "Genre" },
-  { id: "releaseYear", label: "Year" },
+  { id: "artist", label: "Artist", groupable: true },
+  { id: "album", label: "Album", groupable: true },
+  { id: "genre", label: "Genre", groupable: true },
+  { id: "releaseYear", label: "Year", groupable: true },
   { id: "dateAdded", label: "Date Added" },
   { id: "bpm", label: "BPM" },
   { id: "energy", label: "Energy" },

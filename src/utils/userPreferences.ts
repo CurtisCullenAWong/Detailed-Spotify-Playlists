@@ -3,9 +3,9 @@
 export interface UserPreferences {
   // Library preferences
   libraryView: "yours" | "all" | "followed";
-  playlistSortKey: "none" | "name" | "tracks";
+  playlistSortKey: "none" | "name" | "tracks" | "owner";
   playlistSortDir: "asc" | "desc";
-  playlistGroupKey: "none" | "size";
+  playlistGroupKey: "none" | "size" | "owner";
   playlistViewSize: "large" | "medium" | "small";
   playlistOrder: string[]; // Array of playlist IDs in custom order
   
