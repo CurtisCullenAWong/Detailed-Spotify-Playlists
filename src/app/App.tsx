@@ -147,6 +147,7 @@ function Sidebar({
   setSelectedPlaylistId,
   playingPlaylistId,
   enableDeprecatedApis,
+  loadingProfile,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -159,6 +160,7 @@ function Sidebar({
   currentUser: any;
   playingPlaylistId: string | number | null;
   enableDeprecatedApis: boolean;
+  loadingProfile?: boolean;
 }) {
   const preferences = loadPreferences();
   const [, setLibraryDropdownOpen] = useState(false);
@@ -257,7 +259,13 @@ function Sidebar({
 
         {/* Playlist Icons - scrollable */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden w-full flex flex-col items-center gap-2 px-1.5 no-scrollbar">
-          {filteredPlaylists.map((pl) => (
+          {loadingProfile && filteredPlaylists.length === 0 ? (
+            // show small skeleton placeholders while loading
+            Array.from({ length: 8 }).map((_, i) => (
+              <div key={`skeleton-${i}`} className="w-9 h-9 rounded-md bg-[#1f1f1f] animate-pulse" />
+            ))
+          ) : (
+            filteredPlaylists.map((pl) => (
             <button
               key={pl.id}
               onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
@@ -270,7 +278,7 @@ function Sidebar({
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
               )}
             </button>
-          ))}
+            )))}
         </div>
 
         <div className="h-px w-6 bg-[#282828] my-1" />
@@ -319,6 +327,7 @@ function Sidebar({
           setSelectedPlaylistId={setSelectedPlaylistId}
           playingPlaylistId={playingPlaylistId}
           enableDeprecatedApis={enableDeprecatedApis}
+          loadingProfile={loadingProfile}
         />
 
         {/* API Reference link */}
@@ -350,6 +359,7 @@ function Dashboard({
   setSearchQuery,
   enableDeprecatedApis,
   onToggleDeprecatedApis,
+  loadingProfile,
 }: {
   setPage: (p: Page) => void;
   currentUser: any;
@@ -365,6 +375,7 @@ function Dashboard({
   setSearchQuery?: (query: string) => void;
   enableDeprecatedApis: boolean;
   onToggleDeprecatedApis: () => void;
+  loadingProfile?: boolean;
 }) {
   const [hoveredPlaylist, setHoveredPlaylist] = useState<string | number | null>(null);
   const preferences = loadPreferences();
@@ -519,7 +530,16 @@ function Dashboard({
       <div className="px-4 md:px-8 pb-8 md:pb-10 -mt-2">
         {/* Key Data Indicators */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mx-[0px] my-[28px]">
-          {indicators.map((s) => {
+          {loadingProfile ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={`ind-skel-${i}`} className="bg-[#181818] rounded-lg p-3 md:p-4 border border-white/5 text-left w-full">
+                <div className="h-3 w-1/2 bg-[#1f1f1f] rounded animate-pulse" />
+                <div className="h-8 mt-3 w-3/4 bg-[#1f1f1f] rounded animate-pulse" />
+                <div className="h-3 mt-2 w-3/4 bg-[#1f1f1f] rounded animate-pulse" />
+              </div>
+            ))
+          ) : (
+            indicators.map((s) => {
             const isClickable = s.onClick !== undefined;
             return (
               <button
@@ -536,7 +556,8 @@ function Dashboard({
                 <p className="text-[#B3B3B3] text-[11px] md:text-[12px] mt-1 truncate">{s.sub}</p>
               </button>
             );
-          })}
+            })
+          )}
         </div>
 
         {/* Recently Played */}
@@ -544,7 +565,20 @@ function Dashboard({
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-white text-[16px] md:text-[18px] font-bold">Recently Played</h2>
           </div>
-          {recentlyPlayed.length === 0 ? (
+          {loadingProfile ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6 gap-2 md:gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={`rp-skel-${i}`} className="flex items-center gap-3 bg-[#181818] rounded-md overflow-hidden pr-3 p-3">
+                  <div className="w-14 h-14 shrink-0 bg-[#282828] rounded animate-pulse" />
+                  <div className="min-w-0 flex-1">
+                    <div className="h-4 bg-[#1f1f1f] rounded w-3/4 animate-pulse mb-2" />
+                    <div className="h-3 bg-[#1f1f1f] rounded w-1/2 animate-pulse" />
+                  </div>
+                  <div className="w-7 h-7 bg-[#1f1f1f] rounded-full animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : recentlyPlayed.length === 0 ? (
             <div className="text-[#535353] text-sm py-4">No recently played tracks found.</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 md:gap-3">
@@ -589,7 +623,16 @@ function Dashboard({
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-white text-[16px] md:text-[18px] font-bold flex items-center gap-2"><TrendingUp size={18} className="text-[#1DB954]" /> Your Top Artists</h2>
           </div>
-          {topArtists.length === 0 ? (
+          {loadingProfile ? (
+            <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={`ta-skel-${i}`} className="flex flex-col items-center gap-3 shrink-0">
+                  <div className="w-24 h-24 rounded-full bg-[#282828] animate-pulse" />
+                  <div className="h-4 w-20 bg-[#1f1f1f] rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : topArtists.length === 0 ? (
             <div className="text-[#535353] text-sm py-4">No top artists found.</div>
           ) : (
             <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-[#282828] scrollbar-track-transparent">
@@ -3111,6 +3154,7 @@ function LibraryPlaylists({
   setSelectedPlaylistId,
   playingPlaylistId,
   enableDeprecatedApis,
+  loadingProfile,
 }: {
   onOpen: () => void;
   selectedView: "yours" | "all" | "followed";
@@ -3120,6 +3164,7 @@ function LibraryPlaylists({
   setSelectedPlaylistId: (id: string | number) => void;
   playingPlaylistId: string | number | null;
   enableDeprecatedApis: boolean;
+  loadingProfile?: boolean;
 }) {
   // Load preferences from cache
   const preferences = loadPreferences();
@@ -3273,6 +3318,26 @@ function LibraryPlaylists({
   };
 
   const isDraggable = sortKey === "none" && groupKey === "none";
+
+  if (loadingProfile && playlists.length === 0) {
+    // Simple skeleton while profile/playlists load
+    return (
+      <div className="flex flex-col flex-1 min-h-0 px-2 pt-2 pb-2">
+        <div className="flex gap-2 px-2 pb-2">
+          <div className="h-8 w-1/2 bg-[#1f1f1f] rounded animate-pulse" />
+          <div className="h-8 w-1/3 bg-[#1f1f1f] rounded animate-pulse" />
+        </div>
+        <div className="space-y-2 mt-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-2 py-1">
+              <div className="w-8 h-8 rounded bg-[#1f1f1f] animate-pulse" />
+              <div className="h-4 bg-[#1f1f1f] rounded w-3/4 animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-2 pt-2 pb-2">
@@ -3781,6 +3846,7 @@ export default function App() {
   const [likedSongsCount, setLikedSongsCount] = useState<number>(0);
   const [recentlyPlayed, setRecentlyPlayed] = useState<any[]>([]);
   const [topArtists, setTopArtists] = useState<Artist[]>([]);
+  const [loadingProfile, setLoadingProfile] = useState<boolean>(false);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | number>(preferences.selectedPlaylistId || "liked");
   const [playingPlaylistId, setPlayingPlaylistId] = useState<string | number | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
@@ -3842,7 +3908,23 @@ export default function App() {
   }, [enableDeprecatedApis]);
 
   const handleToggleDeprecatedApis = () => {
-    setEnableDeprecatedApis(prev => !prev);
+    const next = !enableDeprecatedApis;
+    try {
+      if (next) {
+        const fallback = import.meta.env.client_id_fallback || "";
+        if (fallback) localStorage.setItem("spotify_client_id", fallback);
+      } else {
+        localStorage.removeItem("spotify_client_id");
+      }
+    } catch (err) {
+      // ignore storage errors
+    }
+
+    // Persist preference immediately and reload to ensure auth module picks up new client id
+    PreferenceUpdaters.setEnableDeprecatedApis(next);
+    setEnableDeprecatedApis(next);
+    // small timeout to allow state to flush in case any sync writes happen
+    setTimeout(() => window.location.reload(), 50);
   };
 
   // Save preferences when they change
@@ -3899,6 +3981,7 @@ export default function App() {
     if (!authenticated) return;
 
     const loadProfileData = async () => {
+      setLoadingProfile(true);
       try {
         const user = await getCurrentUser();
         setCurrentUser(user);
@@ -3936,6 +4019,9 @@ export default function App() {
         }
       } catch (err) {
         console.error("Failed to load user profile data:", err);
+      }
+      finally {
+        setLoadingProfile(false);
       }
     };
 
@@ -4159,6 +4245,7 @@ export default function App() {
           currentUser={currentUser}
           playingPlaylistId={playingPlaylistId}
           enableDeprecatedApis={enableDeprecatedApis}
+          loadingProfile={loadingProfile}
         />
         <main className="flex-1 min-w-0 relative overflow-hidden flex">
           {page === "dashboard" && (
@@ -4177,6 +4264,7 @@ export default function App() {
               setSearchQuery={setSearchQuery}
               enableDeprecatedApis={enableDeprecatedApis}
               onToggleDeprecatedApis={handleToggleDeprecatedApis}
+              loadingProfile={loadingProfile}
             />
           )}
           {page === "workspace" && (

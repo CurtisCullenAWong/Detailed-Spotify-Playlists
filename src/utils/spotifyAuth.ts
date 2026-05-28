@@ -1,7 +1,16 @@
 // Spotify OAuth 2.0 with PKCE Authentication Helpers
 
-const CLIENT_ID = import.meta.env.client_id || "";
 const SCOPE = import.meta.env.scope || "";
+
+function getClientId(): string {
+  try {
+    const override = localStorage.getItem("spotify_client_id");
+    if (override) return override;
+  } catch (err) {
+    // ignore (e.g., non-browser env)
+  }
+  return import.meta.env.client_id || import.meta.env.client_id_fallback || "";
+}
 
 function normalizeScopes(scopeString: string): string {
   return Array.from(
@@ -76,7 +85,7 @@ export async function login(): Promise<void> {
 
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: CLIENT_ID,
+    client_id: getClientId(),
     scope: normalizeScopes(SCOPE),
     code_challenge_method: "S256",
     code_challenge: challenge,
@@ -117,7 +126,7 @@ export async function refreshAccessToken(): Promise<string | null> {
         body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: refreshToken,
-          client_id: CLIENT_ID,
+          client_id: getClientId(),
         }),
       });
 
@@ -195,7 +204,7 @@ export async function handleRedirectCallback(): Promise<boolean> {
         grant_type: "authorization_code",
         code: code,
         redirect_uri: redirectUri,
-        client_id: CLIENT_ID,
+        client_id: getClientId(),
         code_verifier: verifier,
       }),
     });
