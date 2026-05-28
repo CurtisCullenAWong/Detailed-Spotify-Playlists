@@ -1,8 +1,6 @@
 
   # Spotify
 
-  This is a local code bundle for a Spotify manager UI. The original design can be found at https://www.figma.com/design/qKGu9nZLMn1BHdAW3Ojisp/Spotify.
-
   ## Requirements
 
   - Node.js (recommended >= 18)
@@ -27,16 +25,6 @@
   ```
 
   Open the app in your browser (usually at `http://localhost:5173` or `http://127.0.0.1:5173`).
-
-  ## Quick Dev Tip
-
-  While the app is running you can programmatically navigate to the compiled "All Songs" virtual playlist by opening your browser devtools console and running:
-
-  ```js
-  window.goToAllSongs()
-  ```
-
-  This helper is attached to `window` during development to make it faster to jump to the combined "All Songs" view.
 
   ## Notes
 
