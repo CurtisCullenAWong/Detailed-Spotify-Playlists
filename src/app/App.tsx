@@ -80,6 +80,7 @@ import {
   updatePlaylistDetails,
   uploadPlaylistCoverImage,
   createPlaylist,
+  unfollowPlaylist,
 } from "../utils/spotifyApi";
 import Login from "./components/Login";
 import { ImageWithFallback } from "./components/figma/ImageWithFallback";
@@ -974,6 +975,25 @@ function EditPlaylistModal({
     reader.readAsDataURL(file);
   };
 
+  const handleDeletePlaylist = async () => {
+    if (!basePlaylist.id || basePlaylist.id === "new") return;
+    const confirmed = window.confirm(`Are you sure you want to delete "${basePlaylist.name}"? This will remove it from your library.`);
+    if (!confirmed) return;
+
+    setIsSaving(true);
+    try {
+      await unfollowPlaylist(basePlaylist.id);
+      setPlaylists(prev => prev.filter(p => String(p.id) !== String(basePlaylist.id)));
+      toast.success("Playlist deleted successfully!");
+      onClose();
+    } catch (error) {
+      console.error("Error deleting playlist:", error);
+      toast.error("Failed to delete playlist.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -986,12 +1006,7 @@ function EditPlaylistModal({
     setIsSaving(true);
     try {
       if (mode === "create") {
-        if (!currentUserId) {
-          toast.error("Missing Spotify user id. Please refresh and try again.");
-          return;
-        }
-
-        const created = await createPlaylist(currentUserId, {
+        const created = await createPlaylist({
           name: name.trim(),
           description: trimmedDesc,
           public: false,
@@ -1149,7 +1164,18 @@ function EditPlaylistModal({
           </p>
 
           {/* Footer Actions */}
-          <div className="flex justify-end gap-3 mt-4 border-t border-[#383838] pt-4">
+          <div className="flex justify-end items-center gap-3 mt-4 border-t border-[#383838] pt-4">
+            {mode === "edit" && (
+              <button
+                type="button"
+                onClick={handleDeletePlaylist}
+                disabled={isSaving}
+                className="mr-auto flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Trash2 size={14} />
+                <span>Delete Playlist</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -1447,6 +1473,26 @@ function Workspace({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [columnsOpen]);
+
+  useEffect(() => {
+    if (!groupByOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-groupby-dropdown]")) setGroupByOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [groupByOpen]);
+
+  useEffect(() => {
+    if (!playlistFlyoutOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-playlist-flyout]")) setPlaylistFlyoutOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [playlistFlyoutOpen]);
 
   const toggleColVisibility = (id: ColId) => {
     if (groupBy !== "none" && groupBy === id) return;
@@ -1874,7 +1920,7 @@ function Workspace({
 
       {/* Responsive Toolbar */}
       <div className="flex flex-col gap-3 px-4 md:px-8 py-3 border-b border-[#282828] bg-[#121212] shrink-0 overflow-visible lg:flex-row lg:items-center lg:justify-between">
-        {/* Left Side: Playlist Action Buttons */}
+        {/* Left Side: Playback & Playlist Management */}
         <div className="flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
           <button
             onClick={() => {
@@ -1889,40 +1935,46 @@ function Workspace({
             <Play size={18} className="text-black fill-black ml-0.5" />
           </button>
 
-          {isYours && (
-            <button
-              onClick={handleSavePlaylistOrder}
-              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
-              title={!canSortPlaylist
-                ? "Only playlists you own can be saved back to Spotify"
-                : isSavingTrackOrder
-                  ? "Sorting playlist..."
-                  : !hasUnsavedTrackOrder
-                    ? "Playlist sequence is already in sync"
-                    : "Save the current track order to Spotify"}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap ${
-                isSavingTrackOrder 
-                  ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" 
-                  : hasUnsavedTrackOrder 
-                    ? "bg-[#1DB954]/10 text-[#1DB954] border-[#1DB954]/30 hover:bg-[#1DB954]/20 hover:border-[#1DB954]/50 hover:scale-[1.02] active:scale-[0.98] cursor-pointer" 
-                    : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"
-              }`}
-            >
-              <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
-              {isSavingTrackOrder ? "Sorting..." : hasUnsavedTrackOrder ? "Save Sort" : "Sort Playlist"}
-            </button>
-          )}
+          {(isYours || isEditable) && (
+            <div className="flex items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md">
+              {isYours && (
+                <button
+                  onClick={handleSavePlaylistOrder}
+                  disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
+                  title={!canSortPlaylist
+                    ? "Only playlists you own can be saved back to Spotify"
+                    : isSavingTrackOrder
+                      ? "Sorting playlist..."
+                      : !hasUnsavedTrackOrder
+                        ? "Playlist sequence is already in sync"
+                        : "Save the current track order to Spotify"}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+                    isSavingTrackOrder 
+                      ? "bg-[#1DB954] text-black cursor-wait" 
+                      : hasUnsavedTrackOrder 
+                        ? "text-[#1DB954] hover:bg-[#1DB954]/10 cursor-pointer font-bold" 
+                        : "text-[#535353] cursor-not-allowed"
+                  }`}
+                >
+                  <RefreshCw size={12} className={isSavingTrackOrder ? "animate-spin text-black" : ""} />
+                  <span>{isSavingTrackOrder ? "Sorting..." : "Save Sort"}</span>
+                </button>
+              )}
 
-          {isEditable && (
-            <button
-              type="button"
-              onClick={() => setIsEditModalOpen(true)}
-              title="Edit playlist details"
-              className="flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold bg-[#282828] border border-[#535353]/60 hover:border-white text-white/90 hover:text-white transition-all cursor-pointer shrink-0 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
-            >
-              <Pencil size={13} />
-              <span>Edit Details</span>
-            </button>
+              {isYours && isEditable && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />}
+
+              {isEditable && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(true)}
+                  title="Edit playlist details"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white/90 hover:text-white hover:bg-white/5 transition-all whitespace-nowrap cursor-pointer"
+                >
+                  <Pencil size={12} />
+                  <span>Edit Details</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -1941,180 +1993,187 @@ function Workspace({
             />
           </div>
 
-          <div className="relative">
-            <button 
-              onClick={() => setGroupByOpen(o => !o)}
-              className={`flex items-center gap-2 px-4 py-2 bg-[#282828] rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
-                groupByOpen 
-                  ? "bg-[#333333] text-white border-[#1DB954]/40" 
-                  : groupBy !== "none"
-                    ? "bg-[#1DB954]/10 text-[#1DB954] border-[#1DB954]/30 hover:bg-[#1DB954]/20 hover:border-[#1DB954]/50"
-                    : "text-[#B3B3B3] hover:text-white border-[#535353]/60 hover:border-white"
-              }`}
-            >
-              <ListMusic size={13} className={groupBy !== "none" ? "text-[#1DB954]" : ""} />
-              <span>Group By: <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>{GROUP_BY_LABELS[groupBy as GroupByOption]}</span></span>
-              <ChevronDown size={11} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
-            </button>
-            {groupByOpen && (
-              <div className="absolute top-full right-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
-                <button
-                  onClick={() => { setGroupBy("none"); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                  className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
-                >
-                  {GROUP_BY_LABELS.none}
-                  {groupBy === "none" && <Check size={12} />}
-                </button>
-                {GROUPABLE_COLUMNS
-                  .filter((column) => enableDeprecatedApis || column.id !== "genre")
-                  .map((column) => {
-                    const option = column.id as GroupBy;
-                    return (
-                      <button key={option} onClick={() => { setGroupBy(option); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                        className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === option ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
-                        {column.label}
-                        {groupBy === option && <Check size={12} />}
-                      </button>
-                    );
-                  })}
-              </div>
-            )}
-          </div>
-
-          {groupBy !== "none" && (
-            <button
-              onClick={() => {
-                const allCollapsed = collapsedGroups.size === groupedEntries.length;
-                if (allCollapsed) {
-                  setCollapsedGroups(new Set());
-                } else {
-                  setCollapsedGroups(new Set(groupedEntries.map(g => g.label)));
-                }
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-[#282828] rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap hover:scale-[1.02] active:scale-[0.98] cursor-pointer text-[#B3B3B3] hover:text-white border-[#535353]/60 hover:border-white animate-in fade-in duration-200"
-              title={collapsedGroups.size === groupedEntries.length ? "Expand all sections" : "Collapse all sections"}
-            >
-              {collapsedGroups.size === groupedEntries.length ? (
-                <>
-                  <ChevronsUpDown size={13} />
-                  <span>Expand All</span>
-                </>
-              ) : (
-                <>
-                  <ChevronsDownUp size={13} />
-                  <span>Collapse All</span>
-                </>
-              )}
-            </button>
-          )}
-
-          <div className="relative" data-cols-dropdown>
-            <button
-              onClick={() => setColumnsOpen(o => !o)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
-                columnsOpen 
-                  ? "bg-white text-black border-white" 
-                  : "bg-[#282828] text-[#B3B3B3] hover:text-white border-[#535353]/60 hover:border-white"
-              }`}
-            >
-              <Columns3 size={13} />
-              <span>Columns</span>
-              <ChevronDown size={11} className={`transition-transform duration-200 ${columnsOpen ? "rotate-180" : ""}`} />
-            </button>
-            {columnsOpen && (
-              <div className="absolute top-full right-0 mt-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 overflow-hidden flex flex-col">
-                <div className="px-4 py-2 border-b border-[#383838] shrink-0">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Toggle Columns</p>
-                </div>
-                <div className="max-h-60 overflow-y-auto py-1">
-                  {ALL_COLUMNS.filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId)).map(col => (
-                    <button key={col.id} onClick={() => toggleColVisibility(col.id as ColId)}
-                      disabled={groupBy !== "none" && groupBy === col.id}
-                      className={`w-full flex items-center justify-between px-4 py-2 text-[13px] transition-colors text-left ${groupBy !== "none" && groupBy === col.id ? "cursor-not-allowed bg-[#1DB954]/10" : "hover:bg-[#383838] cursor-pointer"}`}>
-                      <span className={visibleCols.has(col.id as ColId) ? "text-white" : "text-[#535353]"}>{col.label}</span>
-                      {visibleCols.has(col.id as ColId) && <Check size={12} className="text-[#1DB954]" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {isYours && (
-            <button
-              disabled={selected.size === 0}
-              onClick={handleDelete}
-              title="Remove selected tracks"
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap ${
-                selected.size > 0 
-                  ? "bg-[#e91429]/10 text-[#e91429] hover:bg-[#e91429]/20 border border-[#e91429]/30 hover:scale-[1.02] active:scale-[0.98] cursor-pointer" 
-                  : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"
-              }`}
-            >
-              <Trash2 size={13} />
-              <span>Remove{selected.size > 0 && ` (${selected.size})`}</span>
-            </button>
-          )}
-
-          <div className="relative">
-            <button
-              disabled={selected.size === 0}
-              onClick={() => setPlaylistFlyoutOpen(o => !o)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap ${
-                selected.size > 0 
-                  ? playlistFlyoutOpen 
-                    ? "bg-white text-black border-white cursor-pointer" 
-                    : "bg-[#282828] text-white border-[#535353]/60 hover:border-white hover:scale-[1.02] active:scale-[0.98] cursor-pointer" 
-                  : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"
-              }`}
-            >
-              <Plus size={13} />
-              <span>Add to Playlist</span>
-              <ChevronDown size={11} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
-            </button>
-            {playlistFlyoutOpen && selected.size > 0 && (
-              <div className="absolute top-full right-0 mt-1 w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-[#383838]">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
-                </div>
-                <div className="max-h-52 overflow-y-auto py-1">
+          <div className="flex items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md">
+            <div className="relative" data-groupby-dropdown>
+              <button 
+                onClick={() => setGroupByOpen(o => !o)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                  groupByOpen 
+                    ? "bg-[#333333] text-white" 
+                    : groupBy !== "none"
+                      ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
+                      : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
+                }`}
+              >
+                <ListMusic size={12} className={groupBy !== "none" ? "text-[#1DB954]" : ""} />
+                <span>Group By: <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>{GROUP_BY_LABELS[groupBy as GroupByOption]}</span></span>
+                <ChevronDown size={10} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
+              </button>
+              {groupByOpen && (
+                <div className="absolute top-full right-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
                   <button
-                    type="button"
-                    onClick={handleCreatePlaylist}
-                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer border-b border-[#383838]"
+                    onClick={() => { setGroupBy("none"); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
                   >
-                    <div className="w-8 h-8 rounded shrink-0 bg-[#1DB954] flex items-center justify-center text-black font-bold">
-                      <Plus size={16} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-white text-[13px] font-medium truncate">Create New Playlist</p>
-                      <p className="text-[#B3B3B3] text-[11px]">Start a new playlist with these tracks</p>
-                    </div>
+                    {GROUP_BY_LABELS.none}
+                    {groupBy === "none" && <Check size={12} />}
                   </button>
-                  {playlists.filter(pl => pl.owner === "yours").length === 0 ? (
-                    <div className="px-4 py-3 text-xs text-[#888888]">No playlists owned by you.</div>
-                  ) : (
-                    playlists.filter(pl => pl.owner === "yours").map(pl => (
-                      <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id)}
-                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer">
-                        <div className="w-8 h-8 rounded shrink-0 bg-[#383838] overflow-hidden">
-                          {pl.cover.startsWith("http") ? (
-                            <img src={pl.cover} className="w-full h-full object-cover" alt="" />
-                          ) : (
-                            <div className={`w-full h-full ${pl.cover}`} />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-white text-[13px] font-medium truncate">{pl.name}</p>
-                          <p className="text-[#B3B3B3] text-[11px]">{getPlaylistTrackCount(pl)} tracks</p>
-                        </div>
+                  {GROUPABLE_COLUMNS
+                    .filter((column) => enableDeprecatedApis || column.id !== "genre")
+                    .map((column) => {
+                      const option = column.id as GroupBy;
+                      return (
+                        <button key={option} onClick={() => { setGroupBy(option); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                          className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === option ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+                          {column.label}
+                          {groupBy === option && <Check size={12} />}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />
+
+            <div className="relative" data-cols-dropdown>
+              <button
+                onClick={() => setColumnsOpen(o => !o)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                  columnsOpen 
+                    ? "bg-white text-black" 
+                    : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
+                }`}
+              >
+                <Columns3 size={12} />
+                <span>Columns</span>
+                <ChevronDown size={10} className={`transition-transform duration-200 ${columnsOpen ? "rotate-180" : ""}`} />
+              </button>
+              {columnsOpen && (
+                <div className="absolute top-full right-0 mt-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 overflow-hidden flex flex-col">
+                  <div className="px-4 py-2 border-b border-[#383838] shrink-0">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Toggle Columns</p>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto py-1">
+                    {ALL_COLUMNS.filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId)).map(col => (
+                      <button key={col.id} onClick={() => toggleColVisibility(col.id as ColId)}
+                        disabled={groupBy !== "none" && groupBy === col.id}
+                        className={`w-full flex items-center justify-between px-4 py-2 text-[13px] transition-colors text-left ${groupBy !== "none" && groupBy === col.id ? "cursor-not-allowed bg-[#1DB954]/10" : "hover:bg-[#383838] cursor-pointer"}`}>
+                        <span className={visibleCols.has(col.id as ColId) ? "text-white" : "text-[#535353]"}>{col.label}</span>
+                        {visibleCols.has(col.id as ColId) && <Check size={12} className="text-[#1DB954]" />}
                       </button>
-                    ))
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {groupBy !== "none" && (
+              <>
+                <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 animate-in fade-in duration-200" />
+                <button
+                  onClick={() => {
+                    const allCollapsed = collapsedGroups.size === groupedEntries.length;
+                    if (allCollapsed) {
+                      setCollapsedGroups(new Set());
+                    } else {
+                      setCollapsedGroups(new Set(groupedEntries.map(g => g.label)));
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all text-[#B3B3B3] hover:text-white hover:bg-white/5 whitespace-nowrap cursor-pointer animate-in fade-in duration-200"
+                  title={collapsedGroups.size === groupedEntries.length ? "Expand all sections" : "Collapse all sections"}
+                >
+                  {collapsedGroups.size === groupedEntries.length ? (
+                    <>
+                      <ChevronsUpDown size={12} />
+                      <span>Expand All</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronsDownUp size={12} />
+                      <span>Collapse All</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+
+          {selected.size > 0 && (
+            <div className="flex items-center bg-[#181818] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md animate-in fade-in slide-in-from-right-4 duration-200">
+              <span className="text-[11px] text-[#B3B3B3] font-bold px-3 border-r border-[#3e3e3e]/80 select-none">
+                {selected.size} selected
+              </span>
+
+              <div className="flex items-center gap-0.5 px-0.5">
+                {isYours && (
+                  <button
+                    onClick={handleDelete}
+                    title="Remove selected tracks from playlist"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 text-[12px] font-semibold transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <Trash2 size={12} />
+                    <span>Remove</span>
+                  </button>
+                )}
+
+                {isYours && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-0.5" />}
+
+                <div className="relative" data-playlist-flyout>
+                  <button
+                    onClick={() => setPlaylistFlyoutOpen(o => !o)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-white/5 text-white text-[12px] font-semibold transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus size={12} />
+                    <span>Add to Playlist</span>
+                    <ChevronDown size={10} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {playlistFlyoutOpen && (
+                    <div className="absolute top-full right-0 mt-1 w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 overflow-hidden">
+                      <div className="px-4 py-2.5 border-b border-[#383838]">
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto py-1">
+                        <button
+                          type="button"
+                          onClick={handleCreatePlaylist}
+                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer border-b border-[#383838]"
+                        >
+                          <div className="w-8 h-8 rounded shrink-0 bg-[#1DB954] flex items-center justify-center text-black font-bold">
+                            <Plus size={16} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-white text-[13px] font-medium truncate">Create New Playlist</p>
+                            <p className="text-[#B3B3B3] text-[11px]">Start a new playlist with these tracks</p>
+                          </div>
+                        </button>
+                        {playlists.filter(pl => pl.owner === "yours").length === 0 ? (
+                          <div className="px-4 py-3 text-xs text-[#888888]">No playlists owned by you.</div>
+                        ) : (
+                          playlists.filter(pl => pl.owner === "yours").map(pl => (
+                            <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id)}
+                              className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer">
+                              <div className="w-8 h-8 rounded shrink-0 bg-[#383838] overflow-hidden">
+                                {pl.cover.startsWith("http") ? (
+                                  <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                                ) : (
+                                  <div className={`w-full h-full ${pl.cover}`} />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-white text-[13px] font-medium truncate">{pl.name}</p>
+                                <p className="text-[#B3B3B3] text-[11px]">{getPlaylistTrackCount(pl)} tracks</p>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

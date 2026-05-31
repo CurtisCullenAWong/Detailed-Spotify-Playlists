@@ -764,14 +764,14 @@ export async function toggleRepeat(state: "track" | "context" | "off", deviceId?
 
 // 9. Playlist Management
 export async function addTracksToPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
-  await spotifyFetch(`/playlists/${playlistId}/tracks`, {
+  await spotifyFetch(`/playlists/${playlistId}/items`, {
     method: "POST",
     body: JSON.stringify({ uris: trackUris }),
   });
 }
 
 export async function removeTracksFromPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
-  await spotifyFetch(`/playlists/${playlistId}/tracks`, {
+  await spotifyFetch(`/playlists/${playlistId}/items`, {
     method: "DELETE",
     body: JSON.stringify({
       tracks: trackUris.map(uri => ({ uri })),
@@ -780,10 +780,9 @@ export async function removeTracksFromPlaylist(playlistId: string | number, trac
 }
 
 export async function createPlaylist(
-  userId: string | number,
   details: { name: string; description?: string; public?: boolean; collaborative?: boolean }
 ): Promise<any> {
-  return await spotifyFetch(`/users/${userId}/playlists`, {
+  return await spotifyFetch("/me/playlists", {
     method: "POST",
     body: JSON.stringify(details),
   });
@@ -860,5 +859,12 @@ export async function uploadPlaylistCoverImage(
       "Content-Type": "image/jpeg",
     },
     body: base64JpegData,
+  });
+}
+
+// 12. Unfollow Playlist (Delete)
+export async function unfollowPlaylist(playlistId: string | number): Promise<void> {
+  await spotifyFetch(`/playlists/${playlistId}/followers`, {
+    method: "DELETE",
   });
 }
