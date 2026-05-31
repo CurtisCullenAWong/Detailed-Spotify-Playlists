@@ -1,10 +1,25 @@
-// API endpoint definitions parsed from Spotify API.json
+// API endpoint definitions parsed dynamically from Spotify API.json
+import spotifyApiData from "../../Spotify API.json";
+
+export interface QueryParamInfo {
+  key: string;
+  value?: string;
+  description?: string;
+}
+
+export interface HeaderInfo {
+  key: string;
+  value?: string;
+  description?: string;
+}
 
 export interface ApiEndpoint {
   method: string;
   path: string;
   desc: string;
-  params?: string;
+  params?: string; // Keep for backward compatibility
+  queryParams?: QueryParamInfo[];
+  headers?: HeaderInfo[];
   body?: string;
   deprecated?: boolean;
 }
@@ -14,77 +29,153 @@ export interface ApiSection {
   endpoints: ApiEndpoint[];
 }
 
-export const API_SECTIONS: ApiSection[] = [
-  {
-    name: "User Profiles & Activity",
-    endpoints: [
-      { method: "GET", path: "/me", desc: "Get detailed profile information about the current user." },
-      { method: "GET", path: "/me/top/artists", desc: "Get the current user's top artists. Use time_range to switch between short_term (last 4 weeks), medium_term (last 6 months), or long_term (all time).", params: "time_range, limit, offset" },
-      { method: "GET", path: "/me/top/tracks", desc: "Get the current user's top tracks. Supports the same time_range, limit, and offset parameters as top artists.", params: "time_range, limit, offset" },
-    ],
-  },
-  {
-    name: "Catalog Information",
-    endpoints: [
-      { method: "GET", path: "/albums/{id}", desc: "Fetch a single album by ID. Use the market parameter to apply content restrictions for a specific country (ISO 3166-1 alpha-2).", params: "market" },
-      { method: "GET", path: "/albums/{id}/tracks", desc: "Retrieve a page of tracks for a specific album. Use limit and offset for pagination through large track lists.", params: "market, limit, offset" },
-      { method: "GET", path: "/artists/{id}", desc: "Get Spotify catalog information for a single artist identified by their Spotify ID." },
-      { method: "GET", path: "/artists/{id}/albums", desc: "Get a paginated list of an artist's albums. Use include_groups to filter by release type (album, single, appears_on, compilation).", params: "include_groups, market, limit, offset" },
-      { method: "GET", path: "/search", desc: "Search for tracks, albums, artists, playlists, shows, or episodes. The 'q' parameter supports field filters: album:, artist:, track:, year:, genre:, isrc:, upc:.", params: "q, type, market, limit, offset, include_external" },
-      { method: "GET", path: "/tracks", desc: "Fetch multiple tracks by comma-separated IDs.", params: "ids, market", deprecated: true },
-      { method: "GET", path: "/albums", desc: "Fetch multiple albums by comma-separated IDs.", params: "ids, market", deprecated: true },
-      { method: "GET", path: "/artists", desc: "Fetch multiple artists by comma-separated Spotify IDs.", params: "ids", deprecated: true },
-      { method: "GET", path: "/audio-features/{id}", desc: "Get audio feature data (tempo, energy, danceability, etc.) for a single track.", deprecated: true },
-      { method: "GET", path: "/audio-features", desc: "Fetch audio features for multiple tracks at once.", params: "ids", deprecated: true },
-      { method: "GET", path: "/tracks/{id}", desc: "Get Spotify catalog information for a single track.", params: "market" },
-      { method: "GET", path: "/audio-analysis/{id}", desc: "Returns detailed audio analysis (sections, segments, beats) for a single track.", deprecated: true },
-    ],
-  },
-  {
-    name: "User Library",
-    endpoints: [
-      { method: "GET", path: "/me/albums", desc: "Get a list of the albums saved in the current user's library.", params: "limit, offset, market" },
-      { method: "GET", path: "/me/tracks", desc: "Get a list of tracks saved in the current user's Liked Songs.", params: "limit, offset, market" },
-      { method: "GET", path: "/me/library/contains", desc: "Check if one or more items are in the current user's library. Pass IDs and the type of content.", params: "ids, type" },
-      { method: "GET", path: "/me/tracks/contains", desc: "Check if the current user has one or more tracks saved.", params: "ids", deprecated: true },
-      { method: "GET", path: "/me/albums/contains", desc: "Check if the current user has one or more albums saved.", params: "ids", deprecated: true },
-      { method: "PUT", path: "/me/library", desc: "Save one or more items to the current user's library.", body: '{ "ids": [...], "type": "track" }' },
-      { method: "DELETE", path: "/me/library", desc: "Remove one or more items from the current user's library.", body: '{ "ids": [...], "type": "track" }' },
-    ],
-  },
-  {
-    name: "Playlists",
-    endpoints: [
-      { method: "GET", path: "/me/playlists", desc: "Get a list of the playlists owned or followed by the current user.", params: "limit, offset" },
-      { method: "GET", path: "/playlists/{id}", desc: "Get a playlist by its Spotify ID. Use fields to request only specific properties and reduce response size.", params: "market, fields" },
-      { method: "GET", path: "/playlists/{id}/items", desc: "Get full details of the items of a playlist. Use limit and offset for pagination through large playlists.", params: "market, limit, offset, fields" },
-      { method: "GET", path: "/playlists/{id}/images", desc: "Get the current image associated with a specific playlist." },
-      { method: "GET", path: "/playlists/{id}/tracks", desc: "Get tracks in a playlist.", params: "market, limit, offset", deprecated: true },
-      { method: "POST", path: "/me/playlists", desc: "Create a new playlist for the current user.", body: '{ "name", "description", "public", "collaborative" }' },
-      { method: "POST", path: "/playlists/{id}/items", desc: "Add one or more items to a playlist. Optionally specify a position.", body: '{ "uris": [...], "position": 0 }' },
-      { method: "PUT", path: "/playlists/{id}", desc: "Update playlist metadata: name, description, public/private, collaborative flag.", body: '{ "name", "description", "public", "collaborative" }' },
-      { method: "PUT", path: "/playlists/{id}/items", desc: "Reorder items in a playlist or replace all items with a new set of URIs.", body: '{ "range_start", "insert_before", "range_length", "snapshot_id" }' },
-      { method: "DELETE", path: "/playlists/{id}/items", desc: "Remove one or more items from a playlist. Optionally provide snapshot_id.", body: '{ "tracks": [{ "uri" }], "snapshot_id" }' },
-    ],
-  },
-  {
-    name: "Player & Playback",
-    endpoints: [
-      { method: "GET", path: "/me/player", desc: "Get information about the user's current playback state (device, progress, track, etc.).", params: "market, additional_types" },
-      { method: "GET", path: "/me/player/currently-playing", desc: "Get the object currently being played on the user's Spotify account.", params: "market, additional_types" },
-      { method: "GET", path: "/me/player/devices", desc: "Get information about a user's available Spotify Connect devices." },
-      { method: "GET", path: "/me/player/queue", desc: "Get the list of objects that make up the user's queue." },
-      { method: "GET", path: "/me/player/recently-played", desc: "Get tracks from the current user's recently played tracks.", params: "limit, before, after" },
-      { method: "PUT", path: "/me/player", desc: "Transfer playback to another device.", body: '{ "device_ids": [...], "play": true }' },
-      { method: "PUT", path: "/me/player/play", desc: "Start or resume playback on a specific device.", params: "device_id", body: '{ "context_uri", "offset", "position_ms" }' },
-      { method: "PUT", path: "/me/player/pause", desc: "Pause playback on the user's account.", params: "device_id" },
-      { method: "PUT", path: "/me/player/seek", desc: "Seek to a specific position in the currently playing track.", params: "position_ms, device_id" },
-      { method: "PUT", path: "/me/player/repeat", desc: "Set the repeat mode: track, context, or off.", params: "state, device_id" },
-      { method: "PUT", path: "/me/player/shuffle", desc: "Toggle shuffle on or off for the user's playback.", params: "state, device_id" },
-      { method: "PUT", path: "/me/player/volume", desc: "Set the volume for the user's current playback device (0–100).", params: "volume_percent, device_id" },
-      { method: "POST", path: "/me/player/next", desc: "Skip to the next track in the user's queue.", params: "device_id" },
-      { method: "POST", path: "/me/player/previous", desc: "Skip to the previous track in the user's queue.", params: "device_id" },
-      { method: "POST", path: "/me/player/queue", desc: "Add an item to the end of the user's current playback queue.", params: "uri, device_id" },
-    ],
-  },
-];
+function parseApiSections(): ApiSection[] {
+  const sectionsMap: Record<string, ApiEndpoint[]> = {};
+
+  function traverse(item: any, parentName: string) {
+    if (item.request) {
+      // It's a request endpoint
+      const method = item.request.method || "GET";
+      const name = item.name || "";
+      
+      // Determine path
+      let path = "";
+      if (item.request.url) {
+        if (typeof item.request.url === "string") {
+          path = item.request.url;
+        } else if (item.request.url.raw) {
+          path = item.request.url.raw;
+        }
+      }
+      
+      // Clean up path: remove base_url and query parameters
+      path = path.replace(/^\{\{base_url\}\}/, "");
+      path = path.replace(/^https?:\/\/[^\/]+/, "");
+      const qIndex = path.indexOf("?");
+      if (qIndex !== -1) {
+        path = path.substring(0, qIndex);
+      }
+      // Convert {{param}} to {param} for display readability
+      path = path.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, "{$1}");
+      if (!path.startsWith("/")) {
+        path = "/" + path;
+      }
+      
+      const desc = item.request.description || "";
+      
+      // Extract query parameters
+      const queryParams: QueryParamInfo[] = [];
+      if (item.request.url && typeof item.request.url === "object" && Array.isArray(item.request.url.query)) {
+        item.request.url.query.forEach((q: any) => {
+          if (q.key) {
+            queryParams.push({
+              key: q.key,
+              value: q.value || undefined,
+              description: q.description || undefined
+            });
+          }
+        });
+      }
+      
+      const params = queryParams.map(q => q.key).filter(Boolean).join(", ");
+      
+      // Extract headers
+      const headers: HeaderInfo[] = [];
+      if (item.request.header && Array.isArray(item.request.header)) {
+        item.request.header.forEach((h: any) => {
+          if (h.key && !h.disabled) {
+            headers.push({
+              key: h.key,
+              value: h.value || undefined,
+              description: h.description || undefined
+            });
+          }
+        });
+      }
+      
+      // Extract body
+      let body: string | undefined;
+      if (item.request.body && item.request.body.mode === "raw" && item.request.body.raw) {
+        body = item.request.body.raw;
+      }
+      
+      const deprecated = name.toLowerCase().includes("deprecated");
+      
+      const endpoint: ApiEndpoint = {
+        method,
+        path,
+        desc,
+        params: params || undefined,
+        queryParams: queryParams.length > 0 ? queryParams : undefined,
+        headers: headers.length > 0 ? headers : undefined,
+        body: body || undefined,
+        deprecated
+      };
+      
+      // Categorize
+      let category = parentName;
+      // Skip top-level method groupings (e.g. "GET Requests") to use cleaner nested categories
+      if (
+        category === "GET Requests" || 
+        category === "PUT Requests" || 
+        category === "POST Requests" || 
+        category === "DELETE Requests" ||
+        !category
+      ) {
+        category = "General";
+      }
+      
+      if (!sectionsMap[category]) {
+        sectionsMap[category] = [];
+      }
+      sectionsMap[category].push(endpoint);
+    } else if (item.item && Array.isArray(item.item)) {
+      for (const child of item.item) {
+        traverse(child, item.name || parentName);
+      }
+    }
+  }
+
+  if (spotifyApiData && Array.isArray((spotifyApiData as any).item)) {
+    for (const topItem of (spotifyApiData as any).item) {
+      traverse(topItem, "");
+    }
+  }
+
+  // Pre-defined category ordering for Spotify layout consistency
+  const preferredOrder = [
+    "User Profiles & Activity",
+    "Catalog Information",
+    "User Library",
+    "Playlists",
+    "Player & Playback",
+    "Experimental"
+  ];
+  
+  const sections: ApiSection[] = [];
+  
+  // Add preferred categories in order if they have endpoints
+  for (const name of preferredOrder) {
+    if (sectionsMap[name] && sectionsMap[name].length > 0) {
+      sections.push({
+        name,
+        endpoints: sectionsMap[name]
+      });
+      delete sectionsMap[name];
+    }
+  }
+  
+  // Add any remaining categories (like "General")
+  for (const [name, endpoints] of Object.entries(sectionsMap)) {
+    if (endpoints && endpoints.length > 0) {
+      sections.push({
+        name,
+        endpoints
+      });
+    }
+  }
+  
+  return sections;
+}
+
+export const API_SECTIONS: ApiSection[] = parseApiSections();

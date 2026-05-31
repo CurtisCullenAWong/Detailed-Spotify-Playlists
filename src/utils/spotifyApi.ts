@@ -809,12 +809,32 @@ export async function reorderPlaylistTracks(
   playlistId: string | number,
   initialTrackIds: string[],
   desiredTrackIds: string[],
-  snapshotId: string | null = null
+  snapshotId: string | null = null,
+  onProgress?: (progress: number) => void
 ): Promise<void> {
   if (desiredTrackIds.length < 2) return;
 
   const workingOrder = [...initialTrackIds];
   let currentSnapshotId = snapshotId;
+  let moveCount = 0;
+
+  // Pre-calculate the total moves needed to calculate accurate progress
+  let totalMovesNeeded = 0;
+  const tempWorkingOrder = [...initialTrackIds];
+  for (let targetIndex = 0; targetIndex < desiredTrackIds.length; targetIndex++) {
+    const desiredTrackId = desiredTrackIds[targetIndex];
+    if (tempWorkingOrder[targetIndex] === desiredTrackId) continue;
+    const currentIndex = tempWorkingOrder.indexOf(desiredTrackId);
+    if (currentIndex === -1) continue;
+    totalMovesNeeded++;
+    const [movedTrackId] = tempWorkingOrder.splice(currentIndex, 1);
+    tempWorkingOrder.splice(targetIndex, 0, movedTrackId);
+  }
+
+  if (totalMovesNeeded === 0) {
+    if (onProgress) onProgress(100);
+    return;
+  }
 
   for (let targetIndex = 0; targetIndex < desiredTrackIds.length; targetIndex++) {
     const desiredTrackId = desiredTrackIds[targetIndex];
@@ -844,7 +864,13 @@ export async function reorderPlaylistTracks(
 
     const [movedTrackId] = workingOrder.splice(currentIndex, 1);
     workingOrder.splice(targetIndex, 0, movedTrackId);
+
+    moveCount++;
+    if (onProgress) {
+      onProgress(Math.round((moveCount / totalMovesNeeded) * 100));
+    }
   }
+  if (onProgress) onProgress(100);
 }
 
 // 10. Update Playlist Details

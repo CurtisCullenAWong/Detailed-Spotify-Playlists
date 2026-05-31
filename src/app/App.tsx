@@ -75,7 +75,6 @@ import {
   removeTracksFromPlaylist,
   getPlaylistSnapshotId,
   reorderPlaylistTracks,
-  spotifyFetch,
   setDeprecatedApisEnabled,
   updatePlaylistDetails,
   uploadPlaylistCoverImage,
@@ -268,18 +267,18 @@ function Sidebar({
             ))
           ) : (
             filteredPlaylists.map((pl) => (
-            <button
-              key={pl.id}
-              onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
-              title={pl.name}
-              className={`w-9 h-9 rounded-md shrink-0 hover:brightness-110 transition-all relative ${selectedPlaylistId === pl.id ? "ring-2 ring-[#1DB954]" : ""}`}
-              style={isUrlOrData(pl.cover) ? { backgroundImage: `url(${pl.cover})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
-            >
-              {!isUrlOrData(pl.cover) && <div className={`w-full h-full rounded-md ${pl.cover}`} />}
-              {playingPlaylistId === pl.id && (
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
-              )}
-            </button>
+              <button
+                key={pl.id}
+                onClick={() => { setSelectedPlaylistId(pl.id); setPage("workspace"); }}
+                title={pl.name}
+                className={`w-9 h-9 rounded-md shrink-0 hover:brightness-110 transition-all relative ${selectedPlaylistId === pl.id ? "ring-2 ring-[#1DB954]" : ""}`}
+                style={isUrlOrData(pl.cover) ? { backgroundImage: `url(${pl.cover})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
+              >
+                {!isUrlOrData(pl.cover) && <div className={`w-full h-full rounded-md ${pl.cover}`} />}
+                {playingPlaylistId === pl.id && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1DB954] animate-pulse" />
+                )}
+              </button>
             )))}
         </div>
 
@@ -416,7 +415,7 @@ function Dashboard({
       onClick: () => {
         setSelectedPlaylistId("all_songs");
         setPage("workspace");
-        }
+      }
     },
     {
       label: "Saved Songs",
@@ -542,22 +541,22 @@ function Dashboard({
             ))
           ) : (
             indicators.map((s) => {
-            const isClickable = s.onClick !== undefined;
-            return (
-              <button
-                key={s.label}
-                onClick={s.onClick}
-                disabled={!isClickable}
-                className={`bg-[#181818] rounded-lg p-3 md:p-4 border border-white/5 text-left transition-all duration-200 w-full focus:outline-none ${isClickable
-                  ? "cursor-pointer hover:bg-[#282828] hover:border-[#1DB954]/30 hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-black/50"
-                  : "cursor-default"
-                  }`}
-              >
-                <p className="text-[#B3B3B3] text-[10px] md:text-[11px] uppercase tracking-widest font-semibold">{s.label}</p>
-                <p className={`text-[22px] md:text-[26px] font-bold mt-1 truncate ${s.color}`}>{s.value}</p>
-                <p className="text-[#B3B3B3] text-[11px] md:text-[12px] mt-1 truncate">{s.sub}</p>
-              </button>
-            );
+              const isClickable = s.onClick !== undefined;
+              return (
+                <button
+                  key={s.label}
+                  onClick={s.onClick}
+                  disabled={!isClickable}
+                  className={`bg-[#181818] rounded-lg p-3 md:p-4 border border-white/5 text-left transition-all duration-200 w-full focus:outline-none ${isClickable
+                    ? "cursor-pointer hover:bg-[#282828] hover:border-[#1DB954]/30 hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-black/50"
+                    : "cursor-default"
+                    }`}
+                >
+                  <p className="text-[#B3B3B3] text-[10px] md:text-[11px] uppercase tracking-widest font-semibold">{s.label}</p>
+                  <p className={`text-[22px] md:text-[26px] font-bold mt-1 truncate ${s.color}`}>{s.value}</p>
+                  <p className="text-[#B3B3B3] text-[11px] md:text-[12px] mt-1 truncate">{s.sub}</p>
+                </button>
+              );
             })
           )}
         </div>
@@ -664,7 +663,7 @@ function Dashboard({
                     {enableDeprecatedApis && (
                       <>
                         <p className="text-[#B3B3B3] text-[11px] truncate max-w-[100px]">{artist.genre}</p>
-                        <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} popularity</p>
+                        <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} plays</p>
                       </>
                     )}
                   </div>
@@ -1248,6 +1247,7 @@ function Workspace({
   const [sortDir, setSortDir] = useState<SortDir>(preferences.workspaceSortDir);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const lastClickedIndexRef = useRef<number | null>(null);
+  const [sortingProgress, setSortingProgress] = useState<number | null>(null);
   const [groupByOpen, setGroupByOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [playlistFlyoutOpen, setPlaylistFlyoutOpen] = useState(false);
@@ -1394,7 +1394,7 @@ function Workspace({
     if (groupBy !== "none") {
       const map = new Map<string, Track[]>();
       for (const t of base) {
-        const key = groupBy === "artist" ? t.artist : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
+        const key = groupBy === "artist" ? (t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist") : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(t);
       }
@@ -1569,25 +1569,48 @@ function Workspace({
 
   const toggleSort = (key: SortKey) => {
     if (!key) return;
-    if (sortKey === key) {
-      if (sortDir === "asc") {
-        setSortDir("desc");
+
+    // Trigger visual sorting loading bar animation
+    setSortingProgress(0);
+    let current = 0;
+    const interval = setInterval(() => {
+      current += 20;
+      if (current >= 100) {
+        clearInterval(interval);
+
+        // Apply the actual sort at the end of the animation
+        if (sortKey === key) {
+          if (sortDir === "asc") {
+            setSortDir("desc");
+          } else {
+            setSortKey(null);
+          }
+        } else {
+          setSortKey(key);
+          setSortDir("asc");
+        }
+
+        setSortingProgress(null);
       } else {
-        setSortKey(null);
+        setSortingProgress(current);
       }
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
+    }, 40); // 200ms total duration
   };
 
   const handleSavePlaylistOrder = async () => {
     if (!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0) return;
 
     setIsSavingTrackOrder(true);
+    setSortingProgress(0);
     try {
       const snapshotId = await getPlaylistSnapshotId(selectedPlaylistId);
-      await reorderPlaylistTracks(selectedPlaylistId, initialTrackOrder, targetTrackOrder, snapshotId);
+      await reorderPlaylistTracks(
+        selectedPlaylistId,
+        initialTrackOrder,
+        targetTrackOrder,
+        snapshotId,
+        (progress) => setSortingProgress(progress)
+      );
 
       // Update playlistTracks locally to match the new saved order
       setPlaylistTracks(prev => {
@@ -1612,6 +1635,7 @@ function Workspace({
       toast.error("Failed to save playlist sequence.");
     } finally {
       setIsSavingTrackOrder(false);
+      setSortingProgress(null);
     }
   };
 
@@ -1668,7 +1692,7 @@ function Workspace({
     if (groupBy === "none") return [{ label: "", tracks: sorted }];
     const map = new Map<string, Track[]>();
     for (const t of sorted) {
-      const key = groupBy === "artist" ? t.artist : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
+      const key = groupBy === "artist" ? (t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist") : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
@@ -1948,16 +1972,15 @@ function Workspace({
                       : !hasUnsavedTrackOrder
                         ? "Playlist sequence is already in sync"
                         : "Save the current track order to Spotify"}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
-                    isSavingTrackOrder 
-                      ? "bg-[#1DB954] text-black cursor-wait" 
-                      : hasUnsavedTrackOrder 
-                        ? "text-[#1DB954] hover:bg-[#1DB954]/10 cursor-pointer font-bold" 
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${isSavingTrackOrder
+                      ? "bg-[#1DB954] text-black cursor-wait"
+                      : hasUnsavedTrackOrder
+                        ? "text-[#1DB954] hover:bg-[#1DB954]/10 cursor-pointer font-bold"
                         : "text-[#535353] cursor-not-allowed"
-                  }`}
+                    }`}
                 >
                   <RefreshCw size={12} className={isSavingTrackOrder ? "animate-spin text-black" : ""} />
-                  <span>{isSavingTrackOrder ? "Sorting..." : "Save Sort"}</span>
+                  <span>{isSavingTrackOrder ? `Saving ${sortingProgress !== null ? `(${Math.round(sortingProgress)}%)` : "..."}` : "Save Sort"}</span>
                 </button>
               )}
 
@@ -1982,28 +2005,27 @@ function Workspace({
         <div className="flex flex-wrap items-center gap-2 md:gap-3 lg:justify-end flex-1 min-w-0 w-full">
           <div className="w-full md:w-auto md:flex-1 md:max-w-xs relative min-w-[140px]">
             <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
-            <input 
-              type="text" 
-              placeholder="Search tracks..." 
-              value={search} 
+            <input
+              type="text"
+              placeholder="Search tracks..."
+              value={search}
               onChange={e => setSearch(e.target.value)}
-              id="workspace-search-input" 
+              id="workspace-search-input"
               name="workspaceSearch"
-              className="w-full pl-9 pr-4 py-2 bg-[#282828] rounded-full text-[12px] md:text-[13px] text-white placeholder-[#B3B3B3] border border-[#3e3e3e]/80 focus:border-[#1DB954]/50 focus:bg-[#333333] outline-none transition-all" 
+              className="w-full pl-9 pr-4 py-2 bg-[#282828] rounded-full text-[12px] md:text-[13px] text-white placeholder-[#B3B3B3] border border-[#3e3e3e]/80 focus:border-[#1DB954]/50 focus:bg-[#333333] outline-none transition-all"
             />
           </div>
 
           <div className="flex items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md">
             <div className="relative" data-groupby-dropdown>
-              <button 
+              <button
                 onClick={() => setGroupByOpen(o => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-                  groupByOpen 
-                    ? "bg-[#333333] text-white" 
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${groupByOpen
+                    ? "bg-[#333333] text-white"
                     : groupBy !== "none"
                       ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
                       : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
-                }`}
+                  }`}
               >
                 <ListMusic size={12} className={groupBy !== "none" ? "text-[#1DB954]" : ""} />
                 <span>Group By: <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>{GROUP_BY_LABELS[groupBy as GroupByOption]}</span></span>
@@ -2039,11 +2061,10 @@ function Workspace({
             <div className="relative" data-cols-dropdown>
               <button
                 onClick={() => setColumnsOpen(o => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-                  columnsOpen 
-                    ? "bg-white text-black" 
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${columnsOpen
+                    ? "bg-white text-black"
                     : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
-                }`}
+                  }`}
               >
                 <Columns3 size={12} />
                 <span>Columns</span>
@@ -2199,6 +2220,13 @@ function Workspace({
           </div>
         )}
 
+        {/* Sleek top loading progress bar when sorting tracks */}
+        {!loadingTracks && sortingProgress !== null && (
+          <div className="absolute top-0 left-0 right-0 z-20 h-[2px] bg-transparent">
+            <div className="h-full bg-gradient-to-r from-[#1DB954] via-[#29d97f] to-[#7CFFB2] transition-all duration-200 ease-out" style={{ width: `${sortingProgress}%` }} />
+          </div>
+        )}
+
         <div ref={tableScrollRef} className={`h-full overflow-auto ${(loadingTracks && playlistTracks.length === 0) ? "opacity-0 pointer-events-none" : ""}`}>
           <table className="w-full min-w-[860px] border-collapse">
             <thead className="sticky top-0 z-10 bg-[#121212]">
@@ -2240,15 +2268,14 @@ function Workspace({
                           onDragEnter={() => handleGroupDragEnter(label)}
                           onDragEnd={handleGroupDragEnd}
                           onDragOver={(e) => e.preventDefault()}
-                          className={`bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e] select-none transition-colors border-b border-[#282828]/20 ${
-                            canReorderGroups ? "hover:border-[#1DB954]/20" : ""
-                          }`}
+                          className={`bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e] select-none transition-colors border-b border-[#282828]/20 ${canReorderGroups ? "hover:border-[#1DB954]/20" : ""
+                            }`}
                           onClick={() => toggleGroup(label)}
                         >
                           <td colSpan={totalColSpan} className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
                               {canReorderGroups && (
-                                <div 
+                                <div
                                   className="p-1 hover:bg-[#282828] rounded cursor-grab active:cursor-grabbing text-[#535353] hover:text-white transition-colors mr-0.5"
                                   onClick={(e) => e.stopPropagation()}
                                 >
@@ -2294,7 +2321,7 @@ function Workspace({
                             >
                               <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); handleRowClick(e, track.id); }}
+                                  onClick={(e) => { e.stopPropagation(); handleRowClick(e, track.id); }}
                                   className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
                                     }`}
                                 >
@@ -2574,163 +2601,9 @@ function Workspace({
 
 // ─── Page 3: API Reference ─────────────────────────────────────────────────────
 
-function EndpointPlayground({ endpoint }: { endpoint: ApiEndpoint }) {
-  // Parse path parameters
-  const pathParams: string[] = [];
-  const pathRegex = /\{([^}]+)\}|\{\{([^}]+)\}\}/g;
-  let match;
-  while ((match = pathRegex.exec(endpoint.path)) !== null) {
-    pathParams.push(match[1] || match[2]);
-  }
-
-  // Parse query parameters
-  const queryParams = endpoint.params ? endpoint.params.split(", ") : [];
-
-  // State for parameters
-  const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
-    const defaults: Record<string, string> = {};
-    pathParams.forEach(p => {
-      // Set sensible defaults for path variables
-      if (p.includes("id")) {
-        if (p.includes("album")) defaults[p] = "4aawyAB9vmqN3u77FjrbEE"; // Daft Punk - RAM
-        else if (p.includes("artist")) defaults[p] = "4tZwfgrHOu2mvq6V4NWiYj"; // Daft Punk
-        else if (p.includes("track")) defaults[p] = "2TpxZ7JUBn3uw46aR7qd6V"; // Daft Punk - Get Lucky
-        else if (p.includes("playlist")) defaults[p] = "37i9dQZF1DXcBWIGo373Ol"; // Lo-fi Beats
-        else defaults[p] = "4aawyAB9vmqN3u77FjrbEE";
-      } else {
-        defaults[p] = "";
-      }
-    });
-    queryParams.forEach((q: string) => {
-      if (q === "limit") defaults[q] = "10";
-      else if (q === "market") defaults[q] = "US";
-      else if (q === "type") defaults[q] = "track";
-      else defaults[q] = "";
-    });
-    return defaults;
-  });
-
-  const [loading, setLoading] = useState(false);
-  const [response, setResponse] = useState<any>(null);
-  const [status, setStatus] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleRun = async () => {
-    setLoading(true);
-    setResponse(null);
-    setStatus(null);
-    setError(null);
-
-    try {
-      // 1. Build path
-      let resolvedPath = endpoint.path;
-      pathParams.forEach(p => {
-        const val = paramValues[p] || "";
-        resolvedPath = resolvedPath.replace(`{${p}}`, val).replace(`{{${p}}}`, val);
-      });
-
-      // 2. Build query parameters
-      const qParams = new URLSearchParams();
-      queryParams.forEach((q: string) => {
-        const val = paramValues[q];
-        if (val) qParams.append(q, val);
-      });
-      const queryStr = qParams.toString();
-      const finalPath = queryStr ? `${resolvedPath}?${queryStr}` : resolvedPath;
-
-      // 3. Perform live API request using spotifyFetch
-      const opts: RequestInit = { method: endpoint.method };
-      if (endpoint.method !== "GET" && endpoint.body) {
-        opts.body = endpoint.body;
-      }
-
-      const res = await spotifyFetch(finalPath, opts);
-      setStatus(200);
-      setResponse(res || { success: true, message: "Request completed with no content." });
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "An error occurred");
-      setStatus(err.message?.match(/\((\d+)\)/)?.[1] ? Number(err.message.match(/\((\d+)\)/)[1]) : 400);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="mt-4 pt-4 border-t border-[#282828] space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1DB954]">Interactive API Playground</h4>
-        <button
-          onClick={handleRun}
-          disabled={loading}
-          className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${loading ? "bg-[#282828] text-[#535353] cursor-not-allowed" : "bg-[#1DB954] text-black hover:bg-[#1ed760] hover:scale-105"}`}
-        >
-          {loading ? "Sending..." : "Send Live Request"}
-        </button>
-      </div>
-
-      {/* Input Fields */}
-      {(pathParams.length > 0 || queryParams.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[#1e1e1e] p-3 rounded-lg border border-white/5">
-          {pathParams.map(p => (
-            <div key={p} className="flex flex-col gap-1">
-              <label htmlFor={`api-path-param-${p}`} className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Path parameter: {"{" + p + "}"}</label>
-              <input
-                type="text"
-                id={`api-path-param-${p}`}
-                name={`pathParam_${p}`}
-                value={paramValues[p] || ""}
-                onChange={e => setParamValues(prev => ({ ...prev, [p]: e.target.value }))}
-                className="bg-[#282828] text-white px-2 py-1 rounded text-xs outline-none border border-transparent focus:border-[#1DB954]/50"
-              />
-            </div>
-          ))}
-          {queryParams.map((q: string) => (
-            <div key={q} className="flex flex-col gap-1">
-              <label htmlFor={`api-query-param-${q}`} className="text-[10px] text-[#B3B3B3] font-mono font-bold uppercase">Query parameter: {q}</label>
-              <input
-                type="text"
-                id={`api-query-param-${q}`}
-                name={`queryParam_${q}`}
-                value={paramValues[q] || ""}
-                onChange={e => setParamValues(prev => ({ ...prev, [q]: e.target.value }))}
-                className="bg-[#282828] text-white px-2 py-1 rounded text-xs outline-none border border-transparent focus:border-[#1DB954]/50"
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Output Console */}
-      {(status !== null || error !== null || response !== null) && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#535353]">Response Console</span>
-            {status && (
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${status >= 200 && status < 300 ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-red-950 text-red-400 border border-red-800"}`}>
-                HTTP {status}
-              </span>
-            )}
-          </div>
-          {error && (
-            <div className="p-3 bg-red-950/20 border border-red-900/30 text-red-400 text-xs rounded font-mono">
-              Error: {error}
-            </div>
-          )}
-          {response && (
-            <pre className="text-[11px] font-mono text-emerald-400 bg-black/40 border border-[#1DB954]/10 rounded p-4 overflow-auto max-h-[260px] scrollbar-thin scrollbar-thumb-[#282828]">
-              {JSON.stringify(response, null, 2)}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ApiReference({ enableDeprecatedApis }: { enableDeprecatedApis: boolean }) {
   const preferences = loadPreferences();
-  const [openSection, setOpenSection] = useState<string>(preferences.apiOpenSection);
+  const [openSection, setOpenSection] = useState<string>(preferences.apiOpenSection || "User Profiles & Activity");
   const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(preferences.apiExpandedEndpoint);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const showDeprecated = enableDeprecatedApis;
@@ -2771,7 +2644,7 @@ function ApiReference({ enableDeprecatedApis }: { enableDeprecatedApis: boolean 
           </div>
           <div className="flex items-center gap-2">
             <Laptop2 size={13} className="text-[#B3B3B3]" />
-            <span className="text-[#B3B3B3] text-[12px]">OAuth 2.0 · Live Playground</span>
+            <span className="text-[#B3B3B3] text-[12px]">OAuth 2.0 · Read Only</span>
           </div>
         </div>
       </div>
@@ -2827,7 +2700,7 @@ function ApiReference({ enableDeprecatedApis }: { enableDeprecatedApis: boolean 
                           <ChevronDown size={14} className={`text-[#535353] transition-transform shrink-0 ${isExpanded ? "rotate-180" : ""}`} />
                         </button>
                         {isExpanded && (
-                          <div className="px-5 pb-4 pt-1 border-t border-[#282828] bg-[#141414]">
+                          <div className="px-5 pb-4 pt-4 border-t border-[#282828] bg-[#141414]">
                             {ep.deprecated && (
                               <div className="mb-3 px-3 py-2 bg-[#e91429]/10 border border-[#e91429]/30 rounded flex items-start gap-2">
                                 <X size={14} className="text-[#e91429] shrink-0 mt-0.5" />
@@ -2837,30 +2710,77 @@ function ApiReference({ enableDeprecatedApis }: { enableDeprecatedApis: boolean 
                                 </div>
                               </div>
                             )}
-                            <p className="text-[#B3B3B3] text-[13px] mb-3">{ep.desc}</p>
-                            {ep.params && (
-                              <div className="mb-3">
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Query Parameters</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {ep.params.split(", ").map(p => (
-                                    <span key={p} className="px-2 py-0.5 bg-[#282828] rounded text-[12px] font-mono text-[#B3B3B3] border border-[#383838]">{p}</span>
-                                  ))}
+                            <p className="text-[#B3B3B3] text-[13px] mb-4 leading-relaxed">{ep.desc}</p>
+                            
+                            {/* Request Headers Section */}
+                            <div className="mb-4">
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Headers</p>
+                              <div className="space-y-1.5 font-mono text-[12px] bg-[#1e1e1e] border border-white/5 rounded-lg p-3">
+                                <div className="flex items-start gap-4">
+                                  <span className="text-[#1DB954] w-28 shrink-0 font-semibold">Authorization</span>
+                                  <span className="text-[#B3B3B3] flex-1">Bearer {"{access_token}"}</span>
+                                </div>
+                                {ep.headers && ep.headers.map((h) => (
+                                  h.key !== "Authorization" && (
+                                    <div key={h.key} className="flex items-start gap-4 border-t border-white/5 pt-1.5 mt-1.5">
+                                      <span className="text-[#1DB954] w-28 shrink-0 font-semibold">{h.key}</span>
+                                      <span className="text-[#B3B3B3] flex-1">
+                                        {h.value || "*"} {h.description && <span className="text-[#535353] text-[11px] block mt-0.5">{h.description}</span>}
+                                      </span>
+                                    </div>
+                                  )
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Query Parameters Section */}
+                            {ep.queryParams && ep.queryParams.length > 0 && (
+                              <div className="mb-4 overflow-hidden border border-white/5 rounded-lg">
+                                <div className="bg-[#1e1e1e] px-4 py-2 border-b border-white/5">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353]">Query Parameters</p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left border-collapse text-[12px]">
+                                    <thead>
+                                      <tr className="bg-[#1a1a1a] text-[#B3B3B3] font-bold border-b border-white/5">
+                                        <th className="px-4 py-2 font-mono text-[#1DB954]">Parameter</th>
+                                        <th className="px-4 py-2">Default / Example</th>
+                                        <th className="px-4 py-2">Description</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-white/5 bg-[#141414]">
+                                      {ep.queryParams.map((q) => (
+                                        <tr key={q.key} className="hover:bg-[#1a1a1a]/50 transition-colors">
+                                          <td className="px-4 py-2.5 font-mono text-white font-semibold">{q.key}</td>
+                                          <td className="px-4 py-2.5 font-mono text-[#B3B3B3]">{q.value || "-"}</td>
+                                          <td className="px-4 py-2.5 text-[#B3B3B3] leading-relaxed">{q.description || "-"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
                                 </div>
                               </div>
                             )}
+
+                            {/* Request Body Section */}
                             {ep.body && (
-                              <div>
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Body</p>
-                                <pre className="text-[12px] font-mono text-[#1DB954] bg-[#0d1f0f] border border-[#1DB954]/20 rounded px-4 py-3 overflow-x-auto">{ep.body}</pre>
+                              <div className="mb-4">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Body (JSON)</p>
+                                <pre className="text-[12px] font-mono text-[#1DB954] bg-[#0d1f0f] border border-[#1DB954]/20 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                                  {ep.body}
+                                </pre>
                               </div>
                             )}
-                            <div className="mt-3 flex items-center gap-2">
-                              <span className="text-[11px] text-[#535353]">Scope required:</span>
-                              <span className="text-[11px] font-mono text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded border border-[#383838]">
-                                {ep.method === "GET" ? "user-read-private" : ep.path.includes("player") ? "user-modify-playback-state" : "playlist-modify-private"}
-                              </span>
+
+                            {/* Scope & Metadata Footer */}
+                            <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-[#535353]">
+                              <div className="flex items-center gap-2">
+                                <span>Required OAuth Scope:</span>
+                                <span className="font-mono text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded border border-[#383838]">
+                                  {ep.method === "GET" ? "user-read-private" : ep.path.includes("player") ? "user-modify-playback-state" : "playlist-modify-private"}
+                                </span>
+                              </div>
                             </div>
-                            <EndpointPlayground endpoint={ep} />
                           </div>
                         )}
                       </div>
@@ -3550,6 +3470,7 @@ function LibraryPlaylists({
   const [sortOpen, setSortOpen] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [sortingProgress, setSortingProgress] = useState<number | null>(null);
   const sortRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
   const sortBtnRef = useRef<HTMLButtonElement>(null);
@@ -3647,9 +3568,29 @@ function LibraryPlaylists({
       });
 
   const toggleSort = (key: PlSortKey) => {
-    if (key === "none") { setSortKey("none"); return; }
-    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else { setSortKey(key); setSortDir("asc"); }
+    // Trigger visual sorting loading bar animation
+    setSortingProgress(0);
+    let current = 0;
+    const interval = setInterval(() => {
+      current += 20;
+      if (current >= 100) {
+        clearInterval(interval);
+
+        // Apply the actual sort at the end of the animation
+        if (key === "none") {
+          setSortKey("none");
+        } else if (sortKey === key) {
+          setSortDir(prev => prev === "asc" ? "desc" : "asc");
+        } else {
+          setSortKey(key);
+          setSortDir("asc");
+        }
+
+        setSortingProgress(null);
+      } else {
+        setSortingProgress(current);
+      }
+    }, 40); // 200ms total duration
   };
 
   // Drag and drop handlers
@@ -3809,6 +3750,13 @@ function LibraryPlaylists({
           ))}
         </div>
       </div>
+
+      {/* Sleek top loading progress bar when sorting playlists */}
+      {sortingProgress !== null && (
+        <div className="mx-2 mb-2 h-[2px] bg-transparent rounded-full overflow-hidden relative">
+          <div className="h-full bg-gradient-to-r from-[#1DB954] via-[#29d97f] to-[#7CFFB2] transition-all duration-200 ease-out" style={{ width: `${sortingProgress}%` }} />
+        </div>
+      )}
 
       {/* list */}
       <div className="overflow-y-auto flex-1 space-y-0.5 no-scrollbar">
