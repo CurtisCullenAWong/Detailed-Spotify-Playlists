@@ -21,6 +21,8 @@ import {
   ChevronDown,
   ChevronRight,
   GripVertical,
+  ChevronsDownUp,
+  ChevronsUpDown,
   X,
   Check,
   MoreHorizontal,
@@ -50,7 +52,7 @@ import {
 } from "../data";
 import type { Track, Playlist, Artist, GroupByOption, ApiEndpoint } from "../data";
 import { loadPreferences, savePreferences, PreferenceUpdaters } from "../utils/userPreferences";
-import { isAuthenticatedSync, logout, handleRedirectCallback } from "../utils/spotifyAuth";
+import { isAuthenticatedSync, logout, handleRedirectCallback, getAccessToken } from "../utils/spotifyAuth";
 import {
   getCurrentUser,
   getUserPlaylists,
@@ -1232,6 +1234,8 @@ function Workspace({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const trackDragItemRef = useRef<string | null>(null);
   const trackDragOverRef = useRef<string | null>(null);
+  const groupDragItemRef = useRef<string | null>(null);
+  const groupDragOverRef = useRef<string | null>(null);
 
   type ColId = "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
   const [columnOrder, setColumnOrder] = useState<ColId[]>(preferences.workspaceColumnOrder as ColId[]);
@@ -1311,8 +1315,9 @@ function Workspace({
   const isEditable = !!activePlaylist && activePlaylist.owner === "yours";
   const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
   const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
+  const canReorderGroups = canSortPlaylist && sortKey === null && groupBy !== "none";
   const currentTrackOrder = trackOrders[currentPlaylistKey] ?? [];
-  const orderedPlaylistTracks = canReorderTracks && currentTrackOrder.length > 0
+  const orderedPlaylistTracks = canSortPlaylist && sortKey === null && currentTrackOrder.length > 0
     ? applyTrackOrder(playlistTracks, currentTrackOrder)
     : playlistTracks;
 
@@ -1325,39 +1330,68 @@ function Workspace({
   }, [orderedPlaylistTracks]);
 
   const sortedPlaylistTracks = React.useMemo(() => {
-    if (!sortKey) {
-      return orderedPlaylistTracks;
+    let base = [...playlistTracks];
+    if (sortKey) {
+      base.sort((a, b) => {
+        const va = a[sortKey as keyof Track];
+        const vb = b[sortKey as keyof Track];
+
+        if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
+        if (va === undefined || va === null) return 1;
+        if (vb === undefined || vb === null) return -1;
+
+        let cmp = 0;
+        if (sortKey === "duration") {
+          cmp = a.durationMs - b.durationMs;
+        } else if (sortKey === "releaseDate") {
+          const da = a.releaseDate || String(a.releaseYear || "");
+          const db = b.releaseDate || String(b.releaseYear || "");
+          cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
+        } else if (typeof va === "number" && typeof vb === "number") {
+          cmp = va - vb;
+        } else {
+          cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+        }
+
+        if (cmp === 0) {
+          const idxA = trackIndices.get(a) ?? 0;
+          const idxB = trackIndices.get(b) ?? 0;
+          return idxA - idxB;
+        }
+
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+    } else {
+      base = [...orderedPlaylistTracks];
     }
-    return [...playlistTracks].sort((a, b) => {
-      const va = a[sortKey as keyof Track];
-      const vb = b[sortKey as keyof Track];
 
-      if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
-      if (va === undefined || va === null) return 1;
-      if (vb === undefined || vb === null) return -1;
-
-      let cmp = 0;
-      if (sortKey === "duration") {
-        cmp = a.durationMs - b.durationMs;
-      } else if (sortKey === "releaseDate") {
-        const da = a.releaseDate || String(a.releaseYear || "");
-        const db = b.releaseDate || String(b.releaseYear || "");
-        cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
-      } else if (typeof va === "number" && typeof vb === "number") {
-        cmp = va - vb;
-      } else {
-        cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+    if (groupBy !== "none") {
+      const map = new Map<string, Track[]>();
+      for (const t of base) {
+        const key = groupBy === "artist" ? t.artist : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(t);
       }
-
-      if (cmp === 0) {
-        const idxA = trackIndices.get(a) ?? 0;
-        const idxB = trackIndices.get(b) ?? 0;
-        return idxA - idxB;
+      const entries = Array.from(map.entries());
+      if (sortKey !== null) {
+        entries.sort((a, b) => {
+          const labelA = a[0];
+          const labelB = b[0];
+          if (groupBy === "releaseYear") {
+            const numA = parseInt(labelA, 10) || 0;
+            const numB = parseInt(labelB, 10) || 0;
+            return sortDir === "asc" ? numA - numB : numB - numA;
+          }
+          return sortDir === "asc"
+            ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
+            : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
+        });
       }
+      return entries.flatMap(([_, tracks]) => tracks);
+    }
 
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, trackIndices]);
+    return base;
+  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, groupBy, trackIndices]);
 
   const targetTrackOrder = sortedPlaylistTracks.map(getTrackOrderKey);
   const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
@@ -1545,12 +1579,12 @@ function Workspace({
 
   const handleRowClick = (e: React.MouseEvent, id: string | number) => {
     // compute index in the currently visible sorted list
-    const idx = sorted.findIndex(t => String(t.id) === String(id));
+    const idx = playSequence.findIndex(t => String(t.id) === String(id));
 
     if (e.shiftKey && lastClickedIndexRef.current !== null && idx !== -1) {
       const start = Math.min(lastClickedIndexRef.current, idx);
       const end = Math.max(lastClickedIndexRef.current, idx);
-      const idsInRange = sorted.slice(start, end + 1).map(t => t.id);
+      const idsInRange = playSequence.slice(start, end + 1).map(t => t.id);
       const isRangeFullySelected = idsInRange.every(trackId => selected.has(trackId));
       setSelected(prev => {
         const next = new Set(prev);
@@ -1572,8 +1606,8 @@ function Workspace({
   };
 
   const toggleAll = () => {
-    if (selected.size === sorted.length) setSelected(new Set());
-    else setSelected(new Set(sorted.map(t => t.id)));
+    if (selected.size === playSequence.length) setSelected(new Set());
+    else setSelected(new Set(playSequence.map(t => t.id)));
   };
 
   const toggleGroup = (label: string) => {
@@ -1592,8 +1626,31 @@ function Workspace({
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
-    return Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
+    const entries = Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
+
+    if (sortKey !== null) {
+      // Sort the groups themselves alphabetically or numerically based on sortDir
+      entries.sort((a, b) => {
+        const labelA = a.label;
+        const labelB = b.label;
+        if (groupBy === "releaseYear") {
+          const numA = parseInt(labelA, 10) || 0;
+          const numB = parseInt(labelB, 10) || 0;
+          return sortDir === "asc" ? numA - numB : numB - numA;
+        }
+        return sortDir === "asc"
+          ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
+          : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
+      });
+    }
+
+    return entries;
   })();
+
+  const playSequence = React.useMemo(() => {
+    if (groupBy === "none") return sorted;
+    return groupedEntries.flatMap(g => g.tracks);
+  }, [sorted, groupedEntries, groupBy]);
 
   const handleAddToPlaylist = async (destPlaylistId: string | number) => {
     const selectedIds = Array.from(selected);
@@ -1675,6 +1732,57 @@ function Workspace({
 
     trackDragItemRef.current = null;
     trackDragOverRef.current = null;
+  };
+
+  const handleGroupDragStart = (label: string) => {
+    if (!canReorderGroups) return;
+    groupDragItemRef.current = label;
+  };
+
+  const handleGroupDragEnter = (label: string) => {
+    if (!canReorderGroups) return;
+    groupDragOverRef.current = label;
+  };
+
+  const handleGroupDragEnd = () => {
+    const draggedLabel = groupDragItemRef.current;
+    const targetLabel = groupDragOverRef.current;
+
+    if (!draggedLabel || !targetLabel || draggedLabel === targetLabel) {
+      groupDragItemRef.current = null;
+      groupDragOverRef.current = null;
+      return;
+    }
+
+    const draggedGroup = groupedEntries.find(g => g.label === draggedLabel);
+    const targetGroup = groupedEntries.find(g => g.label === targetLabel);
+
+    if (!draggedGroup || !targetGroup) {
+      groupDragItemRef.current = null;
+      groupDragOverRef.current = null;
+      return;
+    }
+
+    const currentOrder = orderedPlaylistTracks.map(getTrackOrderKey);
+    const draggedTrackKeys = draggedGroup.tracks.map(getTrackOrderKey);
+    const targetTrackKeys = targetGroup.tracks.map(getTrackOrderKey);
+
+    const targetFirstTrackKey = targetTrackKeys[0];
+    const targetIndex = currentOrder.indexOf(targetFirstTrackKey);
+
+    if (targetIndex !== -1) {
+      const filteredOrder = currentOrder.filter(k => !draggedTrackKeys.includes(k));
+      const newTargetIndex = filteredOrder.indexOf(targetFirstTrackKey);
+      filteredOrder.splice(newTargetIndex, 0, ...draggedTrackKeys);
+
+      setTrackOrders(prev => ({
+        ...prev,
+        [currentPlaylistKey]: filteredOrder,
+      }));
+    }
+
+    groupDragItemRef.current = null;
+    groupDragOverRef.current = null;
   };
 
   const ColHeader = ({ col, label }: { col: ColId; label: string }) => (
@@ -1764,101 +1872,157 @@ function Workspace({
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-3 border-b border-[#282828] bg-[#121212] shrink-0 overflow-visible flex-wrap sm:flex-nowrap">
-        <button
-          onClick={() => {
-            if (playlistTracks.length > 0) {
-              playTrackSequence(sorted, 0)
-                .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
-              if (setPlayingPlaylistId) setPlayingPlaylistId(selectedPlaylistId);
-            }
-          }}
-          className="w-10 h-10 bg-[#1DB954] rounded-full flex items-center justify-center hover:scale-105 transition-transform shadow-lg cursor-pointer shrink-0 mr-1"
-        >
-          <Play size={18} className="text-black fill-black ml-0.5" />
-        </button>
-
-        {isYours && (
+      {/* Responsive Toolbar */}
+      <div className="flex flex-col gap-3 px-4 md:px-8 py-3 border-b border-[#282828] bg-[#121212] shrink-0 overflow-visible lg:flex-row lg:items-center lg:justify-between">
+        {/* Left Side: Playlist Action Buttons */}
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
           <button
-            onClick={handleSavePlaylistOrder}
-            disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
-            title={!canSortPlaylist
-              ? "Only playlists you own can be saved back to Spotify"
-              : isSavingTrackOrder
-                ? "Sorting playlist..."
-                : !hasUnsavedTrackOrder
-                  ? "Playlist sequence is already in sync"
-                  : "Save the current track order to Spotify"}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 ${isSavingTrackOrder ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" : hasUnsavedTrackOrder ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 hover:bg-[#1DB954]/20 cursor-pointer" : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"}`}
+            onClick={() => {
+              if (playlistTracks.length > 0) {
+                playTrackSequence(playSequence, 0)
+                  .catch(() => toast.error("Could not play playlist. Is Spotify open on an active device?"));
+                if (setPlayingPlaylistId) setPlayingPlaylistId(selectedPlaylistId);
+              }
+            }}
+            className="w-10 h-10 bg-[#1DB954] hover:bg-[#1ed760] hover:scale-105 active:scale-95 rounded-full flex items-center justify-center transition-all duration-200 shadow-md shadow-[#1DB954]/25 hover:shadow-[#1DB954]/40 cursor-pointer shrink-0 mr-1"
           >
-            <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
-            {isSavingTrackOrder ? "Sorting..." : hasUnsavedTrackOrder ? "Save Sort" : "Sort Playlist"}
+            <Play size={18} className="text-black fill-black ml-0.5" />
           </button>
-        )}
 
-        {isEditable && (
-          <button
-            type="button"
-            onClick={() => setIsEditModalOpen(true)}
-            title="Edit playlist details"
-            className="flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold bg-[#282828] border border-[#535353] hover:border-white text-white transition-all cursor-pointer shrink-0"
-          >
-            <Pencil size={13} />
-            <span>Edit Details</span>
-          </button>
-        )}
+          {isYours && (
+            <button
+              onClick={handleSavePlaylistOrder}
+              disabled={!canSortPlaylist || !hasUnsavedTrackOrder || targetTrackOrder.length === 0 || isSavingTrackOrder}
+              title={!canSortPlaylist
+                ? "Only playlists you own can be saved back to Spotify"
+                : isSavingTrackOrder
+                  ? "Sorting playlist..."
+                  : !hasUnsavedTrackOrder
+                    ? "Playlist sequence is already in sync"
+                    : "Save the current track order to Spotify"}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap ${
+                isSavingTrackOrder 
+                  ? "bg-[#1DB954] text-black border-[#1DB954] cursor-wait" 
+                  : hasUnsavedTrackOrder 
+                    ? "bg-[#1DB954]/10 text-[#1DB954] border-[#1DB954]/30 hover:bg-[#1DB954]/20 hover:border-[#1DB954]/50 hover:scale-[1.02] active:scale-[0.98] cursor-pointer" 
+                    : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"
+              }`}
+            >
+              <RefreshCw size={13} className={isSavingTrackOrder ? "animate-spin text-black" : hasUnsavedTrackOrder ? "text-[#1DB954]" : "text-[#535353]"} />
+              {isSavingTrackOrder ? "Sorting..." : hasUnsavedTrackOrder ? "Save Sort" : "Sort Playlist"}
+            </button>
+          )}
 
-        <div className="flex-1 min-w-0 max-w-sm relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
-          <input type="text" placeholder="Search tracks..." value={search} onChange={e => setSearch(e.target.value)}
-            id="workspace-search-input" name="workspaceSearch"
-            className="w-full pl-8 pr-3 py-2 bg-[#282828] rounded text-[12px] md:text-[13px] text-white placeholder-[#B3B3B3] border border-transparent focus:border-white/20 outline-none transition-colors" />
-        </div>
-
-        <div className="relative hidden sm:block">
-          <button onClick={() => setGroupByOpen(o => !o)}
-            className="flex items-center gap-2 px-3 py-2 bg-[#282828] rounded text-[13px] text-[#B3B3B3] hover:text-white transition-colors border border-transparent hover:border-white/20 cursor-pointer">
-            <ListMusic size={14} />
-            Group By: <span className="text-white">{GROUP_BY_LABELS[groupBy as GroupByOption]}</span>
-            <ChevronDown size={12} />
-          </button>
-          {groupByOpen && (
-            <div className="absolute top-full left-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
-              <button
-                onClick={() => { setGroupBy("none"); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
-              >
-                {GROUP_BY_LABELS.none}
-                {groupBy === "none" && <Check size={12} />}
-              </button>
-              {GROUPABLE_COLUMNS
-                .filter((column) => enableDeprecatedApis || column.id !== "genre")
-                .map((column) => {
-                  const option = column.id as GroupBy;
-                  return (
-                    <button key={option} onClick={() => { setGroupBy(option); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                      className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === option ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
-                      {column.label}
-                      {groupBy === option && <Check size={12} />}
-                    </button>
-                  );
-                })}
-            </div>
+          {isEditable && (
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(true)}
+              title="Edit playlist details"
+              className="flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold bg-[#282828] border border-[#535353]/60 hover:border-white text-white/90 hover:text-white transition-all cursor-pointer shrink-0 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
+            >
+              <Pencil size={13} />
+              <span>Edit Details</span>
+            </button>
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        {/* Right Side: Filters, Search, View, Selection Options */}
+        <div className="flex flex-wrap items-center gap-2 md:gap-3 lg:justify-end flex-1 min-w-0 w-full">
+          <div className="w-full md:w-auto md:flex-1 md:max-w-xs relative min-w-[140px]">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
+            <input 
+              type="text" 
+              placeholder="Search tracks..." 
+              value={search} 
+              onChange={e => setSearch(e.target.value)}
+              id="workspace-search-input" 
+              name="workspaceSearch"
+              className="w-full pl-9 pr-4 py-2 bg-[#282828] rounded-full text-[12px] md:text-[13px] text-white placeholder-[#B3B3B3] border border-[#3e3e3e]/80 focus:border-[#1DB954]/50 focus:bg-[#333333] outline-none transition-all" 
+            />
+          </div>
+
+          <div className="relative">
+            <button 
+              onClick={() => setGroupByOpen(o => !o)}
+              className={`flex items-center gap-2 px-4 py-2 bg-[#282828] rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+                groupByOpen 
+                  ? "bg-[#333333] text-white border-[#1DB954]/40" 
+                  : groupBy !== "none"
+                    ? "bg-[#1DB954]/10 text-[#1DB954] border-[#1DB954]/30 hover:bg-[#1DB954]/20 hover:border-[#1DB954]/50"
+                    : "text-[#B3B3B3] hover:text-white border-[#535353]/60 hover:border-white"
+              }`}
+            >
+              <ListMusic size={13} className={groupBy !== "none" ? "text-[#1DB954]" : ""} />
+              <span>Group By: <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>{GROUP_BY_LABELS[groupBy as GroupByOption]}</span></span>
+              <ChevronDown size={11} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
+            </button>
+            {groupByOpen && (
+              <div className="absolute top-full right-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
+                <button
+                  onClick={() => { setGroupBy("none"); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                  className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                >
+                  {GROUP_BY_LABELS.none}
+                  {groupBy === "none" && <Check size={12} />}
+                </button>
+                {GROUPABLE_COLUMNS
+                  .filter((column) => enableDeprecatedApis || column.id !== "genre")
+                  .map((column) => {
+                    const option = column.id as GroupBy;
+                    return (
+                      <button key={option} onClick={() => { setGroupBy(option); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
+                        className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === option ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+                        {column.label}
+                        {groupBy === option && <Check size={12} />}
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+
+          {groupBy !== "none" && (
+            <button
+              onClick={() => {
+                const allCollapsed = collapsedGroups.size === groupedEntries.length;
+                if (allCollapsed) {
+                  setCollapsedGroups(new Set());
+                } else {
+                  setCollapsedGroups(new Set(groupedEntries.map(g => g.label)));
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-[#282828] rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap hover:scale-[1.02] active:scale-[0.98] cursor-pointer text-[#B3B3B3] hover:text-white border-[#535353]/60 hover:border-white animate-in fade-in duration-200"
+              title={collapsedGroups.size === groupedEntries.length ? "Expand all sections" : "Collapse all sections"}
+            >
+              {collapsedGroups.size === groupedEntries.length ? (
+                <>
+                  <ChevronsUpDown size={13} />
+                  <span>Expand All</span>
+                </>
+              ) : (
+                <>
+                  <ChevronsDownUp size={13} />
+                  <span>Collapse All</span>
+                </>
+              )}
+            </button>
+          )}
+
           <div className="relative" data-cols-dropdown>
             <button
               onClick={() => setColumnsOpen(o => !o)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${columnsOpen ? "bg-white text-black" : "bg-[#282828] text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+                columnsOpen 
+                  ? "bg-white text-black border-white" 
+                  : "bg-[#282828] text-[#B3B3B3] hover:text-white border-[#535353]/60 hover:border-white"
+              }`}
+            >
               <Columns3 size={13} />
-              Columns
+              <span>Columns</span>
               <ChevronDown size={11} className={`transition-transform duration-200 ${columnsOpen ? "rotate-180" : ""}`} />
             </button>
             {columnsOpen && (
-              <div className="absolute top-full left-0 mt-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 overflow-hidden flex flex-col">
+              <div className="absolute top-full right-0 mt-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 overflow-hidden flex flex-col">
                 <div className="px-4 py-2 border-b border-[#383838] shrink-0">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Toggle Columns</p>
                 </div>
@@ -1881,10 +2045,14 @@ function Workspace({
               disabled={selected.size === 0}
               onClick={handleDelete}
               title="Remove selected tracks"
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${selected.size > 0 ? "bg-[#e91429]/10 text-[#e91429] hover:bg-[#e91429]/20 border border-[#e91429]/30" : "bg-[#282828] text-[#535353] cursor-not-allowed border border-transparent"}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap ${
+                selected.size > 0 
+                  ? "bg-[#e91429]/10 text-[#e91429] hover:bg-[#e91429]/20 border border-[#e91429]/30 hover:scale-[1.02] active:scale-[0.98] cursor-pointer" 
+                  : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"
+              }`}
             >
               <Trash2 size={13} />
-              Remove{selected.size > 0 && ` (${selected.size})`}
+              <span>Remove{selected.size > 0 && ` (${selected.size})`}</span>
             </button>
           )}
 
@@ -1892,9 +2060,16 @@ function Workspace({
             <button
               disabled={selected.size === 0}
               onClick={() => setPlaylistFlyoutOpen(o => !o)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all cursor-pointer ${selected.size > 0 ? playlistFlyoutOpen ? "bg-white text-black" : "bg-[#282828] text-white hover:bg-[#383838]" : "bg-[#282828] text-[#535353] cursor-not-allowed"}`}>
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border shrink-0 whitespace-nowrap ${
+                selected.size > 0 
+                  ? playlistFlyoutOpen 
+                    ? "bg-white text-black border-white cursor-pointer" 
+                    : "bg-[#282828] text-white border-[#535353]/60 hover:border-white hover:scale-[1.02] active:scale-[0.98] cursor-pointer" 
+                  : "bg-[#282828] text-[#535353] border-transparent cursor-not-allowed"
+              }`}
+            >
               <Plus size={13} />
-              Add to Playlist
+              <span>Add to Playlist</span>
               <ChevronDown size={11} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
             </button>
             {playlistFlyoutOpen && selected.size > 0 && (
@@ -2000,9 +2175,27 @@ function Workspace({
                   return (
                     <React.Fragment key={`group-${gi}-${label}`}>
                       {groupBy !== "none" && (
-                        <tr className="bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e]" onClick={() => toggleGroup(label)}>
+                        <tr
+                          draggable={canReorderGroups}
+                          onDragStart={() => handleGroupDragStart(label)}
+                          onDragEnter={() => handleGroupDragEnter(label)}
+                          onDragEnd={handleGroupDragEnd}
+                          onDragOver={(e) => e.preventDefault()}
+                          className={`bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e] select-none transition-colors border-b border-[#282828]/20 ${
+                            canReorderGroups ? "hover:border-[#1DB954]/20" : ""
+                          }`}
+                          onClick={() => toggleGroup(label)}
+                        >
                           <td colSpan={totalColSpan} className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
+                              {canReorderGroups && (
+                                <div 
+                                  className="p-1 hover:bg-[#282828] rounded cursor-grab active:cursor-grabbing text-[#535353] hover:text-white transition-colors mr-0.5"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <GripVertical size={13} />
+                                </div>
+                              )}
                               {isCollapsed
                                 ? <ChevronRight size={14} className="text-[#B3B3B3]" />
                                 : <ChevronDown size={14} className="text-[#B3B3B3]" />}
@@ -2017,8 +2210,10 @@ function Workspace({
                       {!isCollapsed && (() => {
                         const limit = Math.max(0, visibleRowCount - renderedCount);
                         const visibleTracks = tracks.slice(0, limit);
+                        const groupStartIdx = renderedCount;
                         renderedCount += visibleTracks.length;
                         return visibleTracks.map((track, i) => {
+                          const globalIdx = groupStartIdx + i;
                           const isSelected = selected.has(track.id);
                           const trackKey = getTrackOrderKey(track);
                           const trackImage = track.cover;
@@ -2034,7 +2229,7 @@ function Workspace({
                               onDragEnter={() => handleTrackDragEnter(trackKey)}
                               onDragEnd={handleTrackDragEnd}
                               onDragOver={(e) => e.preventDefault()}
-                              className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer select-none ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : i % 2 === 0 ? "" : "bg-[#181818]/40"
+                              className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer select-none ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : globalIdx % 2 === 0 ? "" : "bg-[#181818]/40"
                                 }`}
                               onClick={(e) => handleRowClick(e, track.id)}
                             >
@@ -2052,7 +2247,7 @@ function Workspace({
                                   {isPlayingTrack ? (
                                     <Volume2 size={12} className="text-[#1DB954]" />
                                   ) : (
-                                    i + 1
+                                    globalIdx + 1
                                   )}
                                 </span>
                                 <Play
@@ -2060,7 +2255,7 @@ function Workspace({
                                   className="text-white fill-white hidden group-hover:block cursor-pointer"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    playTrackSequence(sorted, sorted.findIndex(sortedTrack => String(sortedTrack.id) === String(track.id))).catch(() =>
+                                    playTrackSequence(playSequence, playSequence.findIndex(sortedTrack => String(sortedTrack.id) === String(track.id))).catch(() =>
                                       toast.error("Could not play track. Is Spotify open on an active device?")
                                     );
                                   }}
@@ -4090,11 +4285,20 @@ export default function App() {
           const success = await handleRedirectCallback();
           setAuthenticated(success);
         } else {
-          const isAuth = isAuthenticatedSync();
-          setAuthenticated(isAuth);
+          // Fast path: token is present and not yet expired
+          if (isAuthenticatedSync()) {
+            setAuthenticated(true);
+          } else {
+            // Slow path: token may be expired — attempt silent refresh before forcing re-login.
+            // This handles the common "refresh page after 1 hour" case where the access token
+            // has expired but a valid refresh token still exists in localStorage.
+            const newToken = await getAccessToken();
+            setAuthenticated(!!newToken);
+          }
         }
       } catch (err) {
         console.error("Auth initialization failed:", err);
+        setAuthenticated(false);
       } finally {
         setAuthChecking(false);
       }

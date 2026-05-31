@@ -603,33 +603,40 @@ export async function getMultiPlaylistTracks(
 // 4. Get Liked Songs count
 export async function getLikedSongsCount(): Promise<number> {
   const data = await spotifyFetch("/me/tracks?limit=1");
-  return data.total || 0;
+  return data?.total ?? 0;
 }
 
 // 5. Recently Played Tracks
 export async function getRecentlyPlayed(): Promise<any[]> {
   const data = await spotifyFetch("/me/player/recently-played?limit=6");
-  const recentlyPlayed = data.items.map((item: any) => ({
-    title: item.track.name,
-    ago: formatRelativeTime(item.played_at),
-    cover: item.track.album.images?.[0]?.url || "bg-gradient-to-br from-blue-900 to-indigo-950",
-    uri: item.track.uri,
-  }));
+  if (!data?.items?.length) return [];
+  const recentlyPlayed = data.items
+    .filter((item: any) => item?.track?.name)
+    .map((item: any) => ({
+      title: item.track.name,
+      ago: formatRelativeTime(item.played_at),
+      cover: item.track.album?.images?.[0]?.url || "bg-gradient-to-br from-blue-900 to-indigo-950",
+      uri: item.track.uri,
+    }));
 
   return dedupeByKey(recentlyPlayed, item => item.uri);
 }
 
 // 6. Top Artists
 export async function getTopArtists(): Promise<Artist[]> {
-  const data = await spotifyFetch("/me/top/artists?limit=50");
-  const topArtists = data.items.map((artist: any, index: number) => ({
-    id: artist.id,
-    uri: artist.uri,
-    name: artist.name,
-    genre: artist.genres?.[0]?.toUpperCase() || "POP",
-    plays: String((50 - index) * 20 + Math.round(artist.popularity / 10)), // Mock play count descending with payload rank
-    cover: artist.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
-  }));
+  // time_range: medium_term = last 6 months (API spec default). limit=50 is the max.
+  const data = await spotifyFetch("/me/top/artists?time_range=medium_term&limit=50&offset=0");
+  if (!data?.items?.length) return [];
+  const topArtists = data.items
+    .filter((artist: any) => artist?.id)
+    .map((artist: any, index: number) => ({
+      id: artist.id,
+      uri: artist.uri,
+      name: artist.name,
+      genre: artist.genres?.[0]?.toUpperCase() || "POP",
+      plays: String((50 - index) * 20 + Math.round((artist.popularity ?? 0) / 10)), // Mock play count descending with payload rank
+      cover: artist.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
+    }));
 
   return dedupeByKey(topArtists, artist => artist.id);
 }
