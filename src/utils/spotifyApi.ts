@@ -274,14 +274,7 @@ function formatRelativeTime(dateString: string): string {
   return `${diffDays}d ago`;
 }
 
-// --- Duration Formatter (ms to MM:SS) ---
-
-function formatDuration(ms: number): string {
-  const totalSecs = Math.floor(ms / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  return `${mins}:${String(secs).padStart(2, "0")}`;
-}
+import { formatDuration } from "./formatters";
 
 // --- Track Enrichment Helper (Batch fetch audio features & artist genres) ---
 
@@ -370,7 +363,8 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
   return validTracks.map((t, idx) => {
     const features = featuresMap.get(t.id);
     const primaryArtistId = t.artists?.[0]?.id;
-    const genre = primaryArtistId ? genresMap.get(primaryArtistId) || "Pop" : "Pop";
+    const rawGenre = (_deprecatedApisEnabled && primaryArtistId) ? genresMap.get(primaryArtistId) : undefined;
+    const genre = rawGenre || "-";
 
     return {
       id: t.id,
@@ -378,20 +372,20 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
       artist: t.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
       album: t.album?.name || "Unknown Album",
       cover: t.album?.images?.[0]?.url || "",
-      genre: genre.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+      genre: genre === "-" ? "-" : genre.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
       releaseYear: t.album?.release_date ? new Date(t.album.release_date).getFullYear() : 2024,
       releaseDate: t.album?.release_date || "",
       dateAdded: t.added_at ? t.added_at.split("T")[0] : new Date().toISOString().split("T")[0],
-      bpm: features?.tempo ? Math.round(features.tempo) : 120,
-      energy: features?.energy !== undefined ? features.energy : 0.6,
+      bpm: features?.tempo ? Math.round(features.tempo) : undefined,
+      energy: features?.energy !== undefined ? Number(features.energy.toFixed(3)) : undefined,
       popularity: t.popularity ?? 0,
-      danceability: features?.danceability !== undefined ? features.danceability : 0.5,
-      valence: features?.valence !== undefined ? features.valence : 0.5,
-      acousticness: features?.acousticness !== undefined ? features.acousticness : 0.2,
-      instrumentalness: features?.instrumentalness !== undefined ? features.instrumentalness : 0.1,
-      speechiness: features?.speechiness !== undefined ? features.speechiness : 0.05,
-      liveness: features?.liveness !== undefined ? features.liveness : 0.1,
-      loudness: features?.loudness !== undefined ? features.loudness : -6.0,
+      danceability: features?.danceability !== undefined ? Number(features.danceability.toFixed(3)) : undefined,
+      valence: features?.valence !== undefined ? Number(features.valence.toFixed(3)) : undefined,
+      acousticness: features?.acousticness !== undefined ? Number(features.acousticness.toFixed(3)) : undefined,
+      instrumentalness: features?.instrumentalness !== undefined ? Number(features.instrumentalness.toFixed(3)) : undefined,
+      speechiness: features?.speechiness !== undefined ? Number(features.speechiness.toFixed(3)) : undefined,
+      liveness: features?.liveness !== undefined ? Number(features.liveness.toFixed(3)) : undefined,
+      loudness: features?.loudness !== undefined ? Number(features.loudness.toFixed(1)) : undefined,
       duration: formatDuration(t.duration_ms),
       durationMs: t.duration_ms,
     };
