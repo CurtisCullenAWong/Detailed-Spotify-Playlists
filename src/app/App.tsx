@@ -3277,7 +3277,7 @@ function SearchPage({
             <h2 className="text-white text-[18px] font-bold mt-10 mb-5">Your Top Artists</h2>
             <div className="grid grid-cols-5 gap-4">
               {topArtists.slice(0, 5).map(artist => (
-                <button key={artist.name} onClick={() => setQuery(artist.name)}
+                <button key={artist.id || artist.name} onClick={() => setQuery(artist.name)}
                   className="group flex flex-col items-center gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-center">
                   <div className="w-20 h-20 rounded-full flex items-center justify-center relative bg-[#282828] overflow-hidden shrink-0">
                     {artist.cover.startsWith("http") ? (
@@ -3392,7 +3392,7 @@ function SearchPage({
                 <h2 className="text-white text-[18px] font-bold mb-4">Artists</h2>
                 <div className="grid grid-cols-5 gap-4">
                   {matchedArtists.map(artist => (
-                    <button key={artist.name}
+                    <button key={artist.id || artist.name}
                       className="group flex flex-col items-center gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-center">
                       <div className="relative w-full aspect-square rounded-full flex items-center justify-center bg-[#282828] overflow-hidden shrink-0">
                         {artist.cover.startsWith("http") ? (
@@ -3420,7 +3420,7 @@ function SearchPage({
                 <h2 className="text-white text-[18px] font-bold mb-4">Albums</h2>
                 <div className="grid grid-cols-4 xl:grid-cols-6 gap-4">
                   {matchedAlbums.map(t => (
-                    <button key={t.album}
+                    <button key={t.id || t.album}
                       className="group flex flex-col gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-left">
                       <div className="relative w-full aspect-square rounded-md bg-gradient-to-br from-slate-700 to-zinc-900 flex items-center justify-center overflow-hidden">
                         {t.cover.startsWith("http") ? (

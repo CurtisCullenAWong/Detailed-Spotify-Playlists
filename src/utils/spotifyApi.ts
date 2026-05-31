@@ -286,10 +286,11 @@ function formatDuration(ms: number): string {
 // --- Track Enrichment Helper (Batch fetch audio features & artist genres) ---
 
 export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise<Track[]> {
-  if (tracks.length === 0) return [];
+  const validTracks = (tracks || []).filter(t => t !== null && t !== undefined);
+  if (validTracks.length === 0) return [];
 
-  const trackIds = tracks.map(t => t.id).filter(id => !!id);
-  const artistIds = Array.from(new Set(tracks.flatMap(t => t.artists?.map((a: any) => a.id) || []))).filter(id => !!id) as string[];
+  const trackIds = validTracks.map(t => t.id).filter(id => !!id);
+  const artistIds = Array.from(new Set(validTracks.flatMap(t => t.artists?.map((a: any) => a.id) || []))).filter(id => !!id) as string[];
 
   // 1. Fetch Audio Features (deprecated endpoint — only if feature flag is on)
   const featuresMap = new Map<string, any>();
@@ -366,7 +367,7 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
   }
 
   // 3. Map tracks with enriched values
-  return tracks.map((t, idx) => {
+  return validTracks.map((t, idx) => {
     const features = featuresMap.get(t.id);
     const primaryArtistId = t.artists?.[0]?.id;
     const genre = primaryArtistId ? genresMap.get(primaryArtistId) || "Pop" : "Pop";
@@ -653,33 +654,42 @@ export async function searchSpotify(query: string): Promise<{
   // Map Spotify entities
   const tracks = data.tracks?.items ? Array.from(
     new Map(
-      (await enrichTracks(data.tracks.items)).map(track => [String(track.id), track])
+      (await enrichTracks(data.tracks.items.filter((item: any) => item !== null && item !== undefined))).map(track => [String(track.id), track])
     ).values()
   ) : [];
 
-  const artists = data.artists?.items?.map((a: any) => ({
-    name: a.name,
-    genre: a.genres?.[0]?.toUpperCase() || "GENRE",
-    plays: Math.round(a.popularity * 15),
-    cover: a.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
-  })) || [];
+  const artists = data.artists?.items
+    ?.filter((a: any) => a !== null && a !== undefined)
+    .map((a: any) => ({
+      id: a.id,
+      uri: a.uri,
+      name: a.name,
+      genre: a.genres?.[0]?.toUpperCase() || "GENRE",
+      plays: Math.round(a.popularity * 15),
+      cover: a.images?.[0]?.url || "bg-gradient-to-br from-orange-400 to-pink-500",
+    })) || [];
 
-  const playlists = data.playlists?.items?.map((p: any) => ({
-    id: p.id,
-    name: p.name,
-    desc: p.description || "",
-    tracks: readPlaylistTrackTotal(p.tracks),
-    cover: p.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
-    owner: "yours" as const, // Default search playlists as yours
-  })) || [];
+  const playlists = data.playlists?.items
+    ?.filter((p: any) => p !== null && p !== undefined)
+    .map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      desc: p.description || "",
+      tracks: readPlaylistTrackTotal(p.tracks),
+      cover: p.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
+      owner: "yours" as const, // Default search playlists as yours
+    })) || [];
 
-  const albums = data.albums?.items?.map((a: any) => ({
-    album: a.name,
-    artist: a.artists?.map((art: any) => art.name).join(", "),
-    releaseYear: a.release_date ? new Date(a.release_date).getFullYear() : 2024,
-    releaseDate: a.release_date || "",
-    cover: a.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
-  })) || [];
+  const albums = data.albums?.items
+    ?.filter((a: any) => a !== null && a !== undefined)
+    .map((a: any) => ({
+      id: a.id,
+      album: a.name,
+      artist: a.artists?.map((art: any) => art.name).join(", "),
+      releaseYear: a.release_date ? new Date(a.release_date).getFullYear() : 2024,
+      releaseDate: a.release_date || "",
+      cover: a.images?.[0]?.url || "bg-gradient-to-br from-slate-700 to-zinc-900",
+    })) || [];
 
   return { tracks, artists, playlists, albums };
 }
