@@ -42,6 +42,30 @@ const LAZY_ROW_STEP = 100; // rows rendered per batch
 type SortKey = keyof Track | null;
 type GroupBy = GroupByOption;
 type SortDir = "asc" | "desc";
+const compareTracks = (a: Track, b: Track, key: SortKey, dir: SortDir): number => {
+  if (!key) return 0;
+  const va = a[key as keyof Track];
+  const vb = b[key as keyof Track];
+
+  if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
+  if (va === undefined || va === null) return 1;
+  if (vb === undefined || vb === null) return -1;
+
+  let cmp = 0;
+  if (key === "duration") {
+    cmp = a.durationMs - b.durationMs;
+  } else if (key === "releaseDate") {
+    const da = a.releaseDate || String(a.releaseYear || "");
+    const db = b.releaseDate || String(b.releaseYear || "");
+    cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
+  } else if (typeof va === "number" && typeof vb === "number") {
+    cmp = va - vb;
+  } else {
+    cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+  }
+
+  return dir === "asc" ? cmp : -cmp;
+};
 
 interface WorkspaceProps {
   playlists: Playlist[];
@@ -91,6 +115,9 @@ export default function Workspace({
   const lastClickedIndexRef = useRef<number | null>(null);
   const [sortingProgress, setSortingProgress] = useState<number | null>(null);
   const [groupByOpen, setGroupByOpen] = useState(false);
+  const [hoveredGroupBy, setHoveredGroupBy] = useState<GroupBy | null>(null);
+  const [subSortKey, setSubSortKey] = useState<SortKey>(null);
+  const [subSortDir, setSubSortDir] = useState<SortDir>("asc");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [playlistFlyoutOpen, setPlaylistFlyoutOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -183,9 +210,9 @@ export default function Workspace({
   const isEditable = !!activePlaylist && activePlaylist.owner === "yours";
   const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
   const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
-  const canReorderGroups = canSortPlaylist && sortKey === null && groupBy !== "none";
+  const canReorderGroups = canSortPlaylist && groupBy !== "none";
   const currentTrackOrder = trackOrders[currentPlaylistKey] ?? [];
-  const orderedPlaylistTracks = canSortPlaylist && sortKey === null && currentTrackOrder.length > 0
+  const orderedPlaylistTracks = canSortPlaylist && (sortKey === null || groupBy !== "none") && currentTrackOrder.length > 0
     ? applyTrackOrder(playlistTracks, currentTrackOrder)
     : playlistTracks;
 
@@ -229,40 +256,7 @@ export default function Workspace({
   };
 
   const sortedPlaylistTracks = React.useMemo(() => {
-    let base = playlistTracks.filter(Boolean);
-    if (sortKey) {
-      base.sort((a, b) => {
-        const va = a[sortKey as keyof Track];
-        const vb = b[sortKey as keyof Track];
-
-        if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
-        if (va === undefined || va === null) return 1;
-        if (vb === undefined || vb === null) return -1;
-
-        let cmp = 0;
-        if (sortKey === "duration") {
-          cmp = a.durationMs - b.durationMs;
-        } else if (sortKey === "releaseDate") {
-          const da = a.releaseDate || String(a.releaseYear || "");
-          const db = b.releaseDate || String(b.releaseYear || "");
-          cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
-        } else if (typeof va === "number" && typeof vb === "number") {
-          cmp = va - vb;
-        } else {
-          cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
-        }
-
-        if (cmp === 0) {
-          const idxA = trackIndices.get(a) ?? 0;
-          const idxB = trackIndices.get(b) ?? 0;
-          return idxA - idxB;
-        }
-
-        return sortDir === "asc" ? cmp : -cmp;
-      });
-    } else {
-      base = orderedPlaylistTracks.filter(Boolean);
-    }
+    let base = orderedPlaylistTracks.filter(Boolean);
 
     if (groupBy !== "none") {
       const map = new Map<string, Track[]>();
@@ -272,9 +266,9 @@ export default function Workspace({
         map.get(key)!.push(t);
       }
       const entries = Array.from(map.entries());
-      
-      if (sortKey === null) {
-        if (!canReorderGroups) {
+
+      if (!canReorderGroups) {
+        if (subSortKey === null) {
           entries.sort((a, b) => {
             const labelA = a[0];
             const labelB = b[0];
@@ -285,47 +279,75 @@ export default function Workspace({
             }
             return labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
           });
-        }
-      } else {
-        entries.sort((a, b) => {
-          const labelA = a[0];
-          const labelB = b[0];
+        } else {
+          entries.sort((a, b) => {
+            const labelA = a[0];
+            const labelB = b[0];
 
-          // If sorting by the groupBy key itself, sort alphabetically
-          if (sortKey === groupBy || (groupBy === "artist" && sortKey === "artist")) {
-            if (groupBy === "releaseYear") {
-              const numA = parseInt(labelA, 10) || 0;
-              const numB = parseInt(labelB, 10) || 0;
-              return sortDir === "asc" ? numA - numB : numB - numA;
+            // If sorting by the groupBy key itself, sort alphabetically
+            if (subSortKey === groupBy || (groupBy === "artist" && subSortKey === "artist")) {
+              if (groupBy === "releaseYear") {
+                const numA = parseInt(labelA, 10) || 0;
+                const numB = parseInt(labelB, 10) || 0;
+                return subSortDir === "asc" ? numA - numB : numB - numA;
+              }
+              return subSortDir === "asc"
+                ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
+                : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
             }
-            return sortDir === "asc"
-              ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
-              : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
+
+            const valA = getGroupSortValue(a[1], subSortKey);
+            const valB = getGroupSortValue(b[1], subSortKey);
+
+            const isNumA = typeof valA === "number" && !isNaN(valA);
+            const isNumB = typeof valB === "number" && !isNaN(valB);
+
+            if (isNumA && isNumB) {
+              return subSortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+            }
+            if (isNumA) return -1;
+            if (isNumB) return 1;
+
+            const strA = String(valA);
+            const strB = String(valB);
+            const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
+            return subSortDir === "asc" ? cmp : -cmp;
+          });
+        }
+      }
+
+      // Sort the tracks within each group by subSortKey (primary) and sortKey (secondary)
+      for (const entry of entries) {
+        entry[1].sort((a, b) => {
+          if (subSortKey) {
+            const cmpVal = compareTracks(a, b, subSortKey, subSortDir);
+            if (cmpVal !== 0) return cmpVal;
           }
-
-          const valA = getGroupSortValue(a[1], sortKey);
-          const valB = getGroupSortValue(b[1], sortKey);
-
-          const isNumA = typeof valA === "number" && !isNaN(valA);
-          const isNumB = typeof valB === "number" && !isNaN(valB);
-
-          if (isNumA && isNumB) {
-            return sortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+          if (sortKey) {
+            const cmpVal = compareTracks(a, b, sortKey, sortDir);
+            if (cmpVal !== 0) return cmpVal;
           }
-          if (isNumA) return -1;
-          if (isNumB) return 1;
-
-          const strA = String(valA);
-          const strB = String(valB);
-          const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
-          return sortDir === "asc" ? cmp : -cmp;
+          const idxA = trackIndices.get(a) ?? 0;
+          const idxB = trackIndices.get(b) ?? 0;
+          return idxA - idxB;
         });
       }
+
       return entries.flatMap(([_, tracks]) => tracks);
+    } else {
+      if (sortKey) {
+        base.sort((a, b) => {
+          const cmpVal = compareTracks(a, b, sortKey, sortDir);
+          if (cmpVal !== 0) return cmpVal;
+          const idxA = trackIndices.get(a) ?? 0;
+          const idxB = trackIndices.get(b) ?? 0;
+          return idxA - idxB;
+        });
+      }
     }
 
     return base;
-  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, groupBy, trackIndices, canReorderGroups]);
+  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, subSortKey, subSortDir, groupBy, trackIndices, canReorderGroups]);
 
   const targetTrackOrder = sortedPlaylistTracks.map(getTrackOrderKey);
   const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
@@ -383,10 +405,16 @@ export default function Workspace({
   }, [columnsOpen]);
 
   useEffect(() => {
-    if (!groupByOpen) return;
+    if (!groupByOpen) {
+      setHoveredGroupBy(null);
+      return;
+    }
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-groupby-dropdown]")) setGroupByOpen(false);
+      if (!target.closest("[data-groupby-dropdown]")) {
+        setGroupByOpen(false);
+        setHoveredGroupBy(null);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -443,37 +471,19 @@ export default function Workspace({
   }, [orderedPlaylistTracks, search]);
 
   const sorted = React.useMemo(() => {
-    if (!sortKey) return filtered;
-    return [...filtered].sort((a, b) => {
-      const va = a[sortKey as keyof Track];
-      const vb = b[sortKey as keyof Track];
-
-      if ((va === undefined || va === null) && (vb === undefined || vb === null)) return 0;
-      if (va === undefined || va === null) return 1;
-      if (vb === undefined || vb === null) return -1;
-
-      let cmp = 0;
-      if (sortKey === "duration") {
-        cmp = a.durationMs - b.durationMs;
-      } else if (sortKey === "releaseDate") {
-        const da = a.releaseDate || String(a.releaseYear || "");
-        const db = b.releaseDate || String(b.releaseYear || "");
-        cmp = da.localeCompare(db, undefined, { sensitivity: "base", numeric: true });
-      } else if (typeof va === "number" && typeof vb === "number") {
-        cmp = va - vb;
-      } else {
-        cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
-      }
-
-      if (cmp === 0) {
+    if (groupBy !== "none") {
+      return filtered;
+    } else {
+      if (!sortKey) return filtered;
+      return [...filtered].sort((a, b) => {
+        const cmpVal = compareTracks(a, b, sortKey, sortDir);
+        if (cmpVal !== 0) return cmpVal;
         const idxA = trackIndices.get(a) ?? 0;
         const idxB = trackIndices.get(b) ?? 0;
         return idxA - idxB;
-      }
-
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }, [filtered, sortKey, sortDir, trackIndices]);
+      });
+    }
+  }, [filtered, sortKey, sortDir, groupBy, trackIndices]);
 
   const toggleSort = (key: SortKey) => {
     if (!key) return;
@@ -590,7 +600,7 @@ export default function Workspace({
   const groupedEntries: { label: string; tracks: Track[] }[] = (() => {
     if (groupBy === "none") return [{ label: "", tracks: sorted }];
     const map = new Map<string, Track[]>();
-    for (const t of sorted) {
+    for (const t of filtered) {
       if (!t) continue;
       const key = groupBy === "artist" ? (t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist") : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
       if (!map.has(key)) map.set(key, []);
@@ -598,8 +608,8 @@ export default function Workspace({
     }
     const entries = Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
 
-    if (sortKey === null) {
-      if (!canReorderGroups) {
+    if (!canReorderGroups) {
+      if (subSortKey === null) {
         entries.sort((a, b) => {
           const labelA = a.label;
           const labelB = b.label;
@@ -610,40 +620,57 @@ export default function Workspace({
           }
           return labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
         });
-      }
-    } else {
-      entries.sort((a, b) => {
-        const labelA = a.label;
-        const labelB = b.label;
+      } else {
+        entries.sort((a, b) => {
+          const labelA = a.label;
+          const labelB = b.label;
 
-        // If sorting by the groupBy key itself, sort alphabetically
-        if (sortKey === groupBy || (groupBy === "artist" && sortKey === "artist")) {
-          if (groupBy === "releaseYear") {
-            const numA = parseInt(labelA, 10) || 0;
-            const numB = parseInt(labelB, 10) || 0;
-            return sortDir === "asc" ? numA - numB : numB - numA;
+          // If sorting by the groupBy key itself, sort alphabetically
+          if (subSortKey === groupBy || (groupBy === "artist" && subSortKey === "artist")) {
+            if (groupBy === "releaseYear") {
+              const numA = parseInt(labelA, 10) || 0;
+              const numB = parseInt(labelB, 10) || 0;
+              return subSortDir === "asc" ? numA - numB : numB - numA;
+            }
+            return subSortDir === "asc"
+              ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
+              : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
           }
-          return sortDir === "asc"
-            ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
-            : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
+
+          const valA = getGroupSortValue(a.tracks, subSortKey);
+          const valB = getGroupSortValue(b.tracks, subSortKey);
+
+          const isNumA = typeof valA === "number" && !isNaN(valA);
+          const isNumB = typeof valB === "number" && !isNaN(valB);
+
+          if (isNumA && isNumB) {
+            return subSortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+          }
+          if (isNumA) return -1;
+          if (isNumB) return 1;
+
+          const strA = String(valA);
+          const strB = String(valB);
+          const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
+          return subSortDir === "asc" ? cmp : -cmp;
+        });
+      }
+    }
+
+    // Sort the tracks within each group by subSortKey (primary) and sortKey (secondary)
+    for (const entry of entries) {
+      entry.tracks.sort((a, b) => {
+        if (subSortKey) {
+          const cmpVal = compareTracks(a, b, subSortKey, subSortDir);
+          if (cmpVal !== 0) return cmpVal;
         }
-
-        const valA = getGroupSortValue(a.tracks, sortKey);
-        const valB = getGroupSortValue(b.tracks, sortKey);
-
-        const isNumA = typeof valA === "number" && !isNaN(valA);
-        const isNumB = typeof valB === "number" && !isNaN(valB);
-
-        if (isNumA && isNumB) {
-          return sortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+        if (sortKey) {
+          const cmpVal = compareTracks(a, b, sortKey, sortDir);
+          if (cmpVal !== 0) return cmpVal;
         }
-        if (isNumA) return -1;
-        if (isNumB) return 1;
-
-        const strA = String(valA);
-        const strB = String(valB);
-        const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
-        return sortDir === "asc" ? cmp : -cmp;
+        const idxA = trackIndices.get(a) ?? 0;
+        const idxB = trackIndices.get(b) ?? 0;
+        return idxA - idxB;
       });
     }
 
@@ -928,10 +955,10 @@ export default function Workspace({
                         ? "Playlist sequence is already in sync"
                         : "Save the current track order to Spotify"}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${isSavingTrackOrder
-                      ? "bg-[#1DB954] text-black cursor-wait"
-                      : hasUnsavedTrackOrder
-                        ? "text-[#1DB954] hover:bg-[#1DB954]/10 cursor-pointer font-bold"
-                        : "text-[#535353] cursor-not-allowed"
+                    ? "bg-[#1DB954] text-black cursor-wait"
+                    : hasUnsavedTrackOrder
+                      ? "text-[#1DB954] hover:bg-[#1DB954]/10 cursor-pointer font-bold"
+                      : "text-[#535353] cursor-not-allowed"
                     }`}
                 >
                   <RefreshCw size={12} className={isSavingTrackOrder ? "animate-spin text-black" : ""} />
@@ -976,37 +1003,135 @@ export default function Workspace({
               <button
                 onClick={() => setGroupByOpen(o => !o)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${groupByOpen
-                    ? "bg-[#333333] text-white"
-                    : groupBy !== "none"
-                      ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
-                      : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
+                  ? "bg-[#333333] text-white"
+                  : groupBy !== "none"
+                    ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
+                    : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
                   }`}
               >
                 <ListMusic size={12} className={groupBy !== "none" ? "text-[#1DB954]" : ""} />
-                <span>Group By: <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>{GROUP_BY_LABELS[groupBy as GroupByOption]}</span></span>
+                <span>
+                  Group By:{" "}
+                  <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>
+                    {groupBy !== "none"
+                      ? `${GROUP_BY_LABELS[groupBy as GroupByOption]}${subSortKey ? ` (${ALL_COLUMNS.find((c) => c.id === subSortKey)?.label || subSortKey})` : ""}`
+                      : GROUP_BY_LABELS.none}
+                  </span>
+                </span>
                 <ChevronDown size={10} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
               </button>
               {groupByOpen && (
-                <div className="absolute top-full right-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1 overflow-hidden">
+                <div
+                  onMouseLeave={() => setHoveredGroupBy(null)}
+                  className="absolute top-full right-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
+                >
                   <button
-                    onClick={() => { setGroupBy("none"); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                    onClick={() => {
+                      setGroupBy("none");
+                      setSortKey(null);
+                      setSubSortKey(null);
+                      setGroupByOpen(false);
+                      setCollapsedGroups(new Set());
+                    }}
+                    onMouseEnter={() => setHoveredGroupBy(null)}
+                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors rounded-t-lg cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
                   >
-                    {GROUP_BY_LABELS.none}
+                    <span>{GROUP_BY_LABELS.none}</span>
                     {groupBy === "none" && <Check size={12} />}
                   </button>
                   {GROUPABLE_COLUMNS
                     .filter((column) => enableDeprecatedApis || column.id !== "genre")
-                    .map((column) => {
+                    .map((column, index, arr) => {
                       const option = column.id as GroupBy;
+                      const isActive = groupBy === option;
+                      const isLast = index === arr.length - 1;
                       return (
-                        <button key={option} onClick={() => { setGroupBy(option); setGroupByOpen(false); setCollapsedGroups(new Set()); }}
-                          className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === option ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}>
-                          {column.label}
-                          {groupBy === option && <Check size={12} />}
-                        </button>
+                        <div
+                          key={option}
+                          className="relative"
+                          onMouseEnter={() => setHoveredGroupBy(option)}
+                        >
+                          <button
+                            onClick={() => {
+                              setGroupBy(option);
+                              setSortKey(null);
+                              setSubSortKey(null);
+                              setGroupByOpen(false);
+                              setCollapsedGroups(new Set());
+                            }}
+                            className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${isLast ? "rounded-b-lg" : ""} ${isActive ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                          >
+                            <span>{column.label}</span>
+                            <div className="flex items-center gap-1.5">
+                              {isActive && <Check size={12} className="text-[#1DB954]" />}
+                              <ChevronRight size={12} className="opacity-60" />
+                            </div>
+                          </button>
+                        </div>
                       );
                     })}
+
+                  {/* Floating Sub-menu */}
+                  {hoveredGroupBy && hoveredGroupBy !== "none" && (
+                    <div
+                      className="absolute top-0 left-full ml-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 max-h-[350px] overflow-y-auto"
+                      style={{ scrollbarWidth: "thin" }}
+                    >
+                      <div className="px-3 py-1.5 border-b border-[#383838] mb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                          Sub-sort {GROUP_BY_LABELS[hoveredGroupBy]}
+                        </p>
+                      </div>
+
+                      {/* Default (No Sub-sort) Option */}
+                      <button
+                        onClick={() => {
+                          setGroupBy(hoveredGroupBy);
+                          setSubSortKey(null);
+                          setGroupByOpen(false);
+                          setCollapsedGroups(new Set());
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === hoveredGroupBy && subSortKey === null ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                      >
+                        <span className="truncate">Default</span>
+                        {groupBy === hoveredGroupBy && subSortKey === null && <Check size={12} />}
+                      </button>
+
+                      {/* Columns to sort by */}
+                      {ALL_COLUMNS
+                        .filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId))
+                        .map(col => {
+                          const isCurrentSort = groupBy === hoveredGroupBy && subSortKey === col.id;
+                          return (
+                            <button
+                              key={col.id}
+                              onClick={() => {
+                                setGroupBy(hoveredGroupBy);
+                                if (subSortKey === col.id) {
+                                  setSubSortDir(dir => dir === "asc" ? "desc" : "asc");
+                                } else {
+                                  setSubSortKey(col.id as SortKey);
+                                  setSubSortDir("asc");
+                                }
+                                setGroupByOpen(false);
+                                setCollapsedGroups(new Set());
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${isCurrentSort ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                            >
+                              <span className="truncate">{col.label}</span>
+                              <div className="flex items-center gap-1.5">
+                                {isCurrentSort && (
+                                  <>
+                                    <span className="font-mono text-[10px]">{subSortDir === "asc" ? "↑" : "↓"}</span>
+                                    <Check size={12} className="text-[#1DB954]" />
+                                  </>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1017,8 +1142,8 @@ export default function Workspace({
               <button
                 onClick={() => setColumnsOpen(o => !o)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${columnsOpen
-                    ? "bg-white text-black"
-                    : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
+                  ? "bg-white text-black"
+                  : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
                   }`}
               >
                 <Columns3 size={12} />
