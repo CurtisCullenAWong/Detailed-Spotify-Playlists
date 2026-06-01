@@ -22,7 +22,7 @@ import type { Playlist } from "../../data";
 import { loadPreferences, PreferenceUpdaters } from "../../utils/userPreferences";
 import { isUrlOrData, getPlaylistTrackCount } from "../../utils/spotifyHelpers";
 
-type PlSortKey = "none" | "name" | "tracks" | "owner";
+type PlSortKey = "none" | "name" | "tracks" | "owner" | "dateCreated";
 type PlGroupKey = "none" | "size" | "owner";
 type ViewSize = "large" | "medium" | "small";
 
@@ -30,6 +30,7 @@ const PLAYLIST_SORT_OPTIONS: Array<{ key: Exclude<PlSortKey, "none">; label: str
   { key: "name", label: "Name" },
   { key: "tracks", label: "Track count" },
   { key: "owner", label: "Owner" },
+  { key: "dateCreated", label: "Date created" },
 ];
 
 const PLAYLIST_GROUP_OPTIONS: Array<{ key: Exclude<PlGroupKey, "none">; label: string }> = [
@@ -42,7 +43,9 @@ const getPlaylistOwnerLabel = (owner: Playlist["owner"]) => owner === "yours" ? 
 const getPlaylistSortValue = (playlist: Playlist, key: Exclude<PlSortKey, "none">) => {
   if (key === "name") return playlist.name;
   if (key === "tracks") return getPlaylistTrackCount(playlist);
-  return playlist.owner === "yours" ? 0 : 1;
+  if (key === "owner") return playlist.owner === "yours" ? 0 : 1;
+  if (key === "dateCreated") return playlist.dateCreated || "";
+  return "";
 };
 
 const getPlaylistGroupLabel = (playlist: Playlist, key: Exclude<PlGroupKey, "none">) => {
@@ -56,6 +59,7 @@ const PLAYLIST_OWNER_GROUP_ORDER = ["My Playlists", "Followed Playlists"] as con
 interface LibraryPlaylistsProps {
   onOpen: () => void;
   selectedView: "yours" | "all" | "followed";
+  setSelectedView: (view: "all" | "yours" | "followed") => void;
   playlists: Playlist[];
   likedSongsCount: number;
   selectedPlaylistId: string | number;
@@ -68,6 +72,7 @@ interface LibraryPlaylistsProps {
 export default function LibraryPlaylists({
   onOpen,
   selectedView,
+  setSelectedView,
   playlists,
   likedSongsCount,
   selectedPlaylistId,
@@ -278,6 +283,27 @@ export default function LibraryPlaylists({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-2 pt-2 pb-2">
+      {/* Filter Pills */}
+      <div className="flex items-center gap-1.5 px-2 pb-2 overflow-x-auto no-scrollbar shrink-0">
+        {([
+          { key: "all", label: "All" },
+          { key: "yours", label: "Yours" },
+          { key: "followed", label: "Followed" }
+        ] as const).map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setSelectedView(key)}
+            className={`px-3 py-1 rounded-full text-[11px] font-semibold transition-all shrink-0 cursor-pointer select-none ${
+              selectedView === key
+                ? "bg-white text-black font-bold animate-in zoom-in-95 duration-100"
+                : "bg-[#282828] text-[#B3B3B3] hover:bg-[#383838] hover:text-white"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* toolbar: Group + Sort in one row */}
       <div className="flex items-center gap-1.5 px-2 pb-2">
         {/* Group by */}

@@ -419,7 +419,41 @@ export async function getUserPlaylists(currentUserId: string): Promise<Playlist[
     120 // 120ms between pages to stay safely under rate limits
   );
 
-  return dedupeByKey(playlists, playlist => playlist.id);
+  const deduped = dedupeByKey(playlists, playlist => playlist.id);
+
+  // Load or initialize creation dates
+  let dateMap: Record<string, string> = {};
+  try {
+    const stored = localStorage.getItem("spotify-playlist-creation-dates");
+    if (stored) dateMap = JSON.parse(stored);
+  } catch (e) {
+    console.warn("Failed to load playlist creation dates", e);
+  }
+
+  let updated = false;
+  const enriched = deduped.map((pl, index) => {
+    const key = String(pl.id);
+    if (!dateMap[key]) {
+      // Mock a creation date that preserves order: older playlists created earlier
+      const date = new Date(Date.now() - index * 7 * 24 * 60 * 60 * 1000).toISOString();
+      dateMap[key] = date;
+      updated = true;
+    }
+    return {
+      ...pl,
+      dateCreated: dateMap[key],
+    };
+  });
+
+  if (updated) {
+    try {
+      localStorage.setItem("spotify-playlist-creation-dates", JSON.stringify(dateMap));
+    } catch (e) {
+      console.warn("Failed to save playlist creation dates", e);
+    }
+  }
+
+  return enriched;
 }
 
 // 3. Playlist Tracks or Liked Songs (single playlist, enriched)

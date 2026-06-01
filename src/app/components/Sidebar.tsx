@@ -29,6 +29,8 @@ interface SidebarProps {
   playingPlaylistId: string | number | null;
   enableDeprecatedApis: boolean;
   loadingProfile?: boolean;
+  libraryView: "all" | "yours" | "followed";
+  setLibraryView: (view: "all" | "yours" | "followed") => void;
 }
 
 export default function Sidebar({
@@ -43,16 +45,11 @@ export default function Sidebar({
   playingPlaylistId,
   enableDeprecatedApis,
   loadingProfile,
+  libraryView,
+  setLibraryView,
 }: SidebarProps) {
-  const preferences = loadPreferences();
   const [, setLibraryDropdownOpen] = useState(false);
-  const [selectedLibraryView] = useState<"all" | "yours" | "followed">(preferences.libraryView);
   const libraryDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Save library view preference when it changes
-  useEffect(() => {
-    PreferenceUpdaters.setLibraryView(selectedLibraryView);
-  }, [selectedLibraryView]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -72,9 +69,9 @@ export default function Sidebar({
   // Filter playlists based on selected view (include followed playlists regardless of feature flag)
   const visiblePlaylists = playlists;
   const filteredPlaylists =
-    selectedLibraryView === "all"
+    libraryView === "all"
       ? visiblePlaylists
-      : visiblePlaylists.filter(pl => pl.owner === selectedLibraryView);
+      : visiblePlaylists.filter(pl => pl.owner === libraryView);
 
   if (collapsed) {
     return (
@@ -199,7 +196,8 @@ export default function Sidebar({
       <div className="mt-2 pt-2 border-t border-[#282828] flex-1 overflow-hidden flex flex-col min-h-0">
         <LibraryPlaylists
           onOpen={() => setPage("workspace")}
-          selectedView={selectedLibraryView}
+          selectedView={libraryView}
+          setSelectedView={setLibraryView}
           playlists={playlists}
           likedSongsCount={likedSongsCount}
           selectedPlaylistId={selectedPlaylistId}

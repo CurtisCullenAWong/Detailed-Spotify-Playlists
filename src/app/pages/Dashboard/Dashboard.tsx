@@ -44,6 +44,8 @@ interface DashboardProps {
   enableDeprecatedApis: boolean;
   onToggleDeprecatedApis: () => void;
   loadingProfile?: boolean;
+  libraryView: "all" | "yours" | "followed";
+  setLibraryView: (view: "all" | "yours" | "followed") => void;
 }
 
 export default function Dashboard({
@@ -61,16 +63,12 @@ export default function Dashboard({
   enableDeprecatedApis,
   onToggleDeprecatedApis,
   loadingProfile,
+  libraryView,
+  setLibraryView,
 }: DashboardProps) {
   const [hoveredPlaylist, setHoveredPlaylist] = useState<string | number | null>(null);
-  const preferences = loadPreferences();
-  const [libraryView, setLibraryView] = useState<"all" | "yours" | "followed">(preferences.libraryView);
   const [headerDropdownOpen, setHeaderDropdownOpen] = useState(false);
   const headerDropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    PreferenceUpdaters.setLibraryView(libraryView);
-  }, [libraryView]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {

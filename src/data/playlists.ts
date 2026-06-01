@@ -7,6 +7,7 @@ export interface Playlist {
   tracks: number;
   cover: string;
   owner: "yours" | "followed";
+  dateCreated?: string;
 }
 
 export const PLAYLISTS: Playlist[] = [];

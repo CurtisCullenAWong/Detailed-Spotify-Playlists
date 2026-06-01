@@ -3,7 +3,7 @@
 export interface UserPreferences {
   // Library preferences
   libraryView: "yours" | "all" | "followed";
-  playlistSortKey: "none" | "name" | "tracks" | "owner";
+  playlistSortKey: "none" | "name" | "tracks" | "owner" | "dateCreated";
   playlistSortDir: "asc" | "desc";
   playlistGroupKey: "none" | "size" | "owner";
   playlistViewSize: "large" | "medium" | "small";
@@ -42,7 +42,7 @@ const STORAGE_KEY = "spotify-manager-preferences";
 
 // Default preferences
 const defaultPreferences: UserPreferences = {
-  libraryView: "yours",
+  libraryView: "all",
   playlistSortKey: "none",
   playlistSortDir: "asc",
   playlistGroupKey: "none",

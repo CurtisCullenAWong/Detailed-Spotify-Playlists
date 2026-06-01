@@ -197,6 +197,30 @@ export default function Workspace({
     return map;
   }, [orderedPlaylistTracks]);
 
+const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
+  if (!key || tracks.length === 0) return "";
+
+  const firstTrack = tracks[0];
+  const val = firstTrack[key as keyof Track];
+
+  if (typeof val === "number") {
+    // For numeric fields, return the average value in the group
+    const sum = tracks.reduce((acc, t) => {
+      const v = t[key as keyof Track];
+      return acc + (typeof v === "number" ? v : 0);
+    }, 0);
+    return sum / tracks.length;
+  }
+
+  if (key === "releaseDate") {
+    const dates = tracks.map(t => t.releaseDate || String(t.releaseYear || "")).filter(Boolean);
+    if (dates.length === 0) return "";
+    return dates[0];
+  }
+
+  return String(val || "");
+};
+
   const sortedPlaylistTracks = React.useMemo(() => {
     let base = [...playlistTracks];
     if (sortKey) {
@@ -245,14 +269,30 @@ export default function Workspace({
         entries.sort((a, b) => {
           const labelA = a[0];
           const labelB = b[0];
-          if (groupBy === "releaseYear") {
-            const numA = parseInt(labelA, 10) || 0;
-            const numB = parseInt(labelB, 10) || 0;
-            return sortDir === "asc" ? numA - numB : numB - numA;
+
+          // If sorting by the groupBy key itself, sort alphabetically
+          if (sortKey === groupBy || (groupBy === "artist" && sortKey === "artist")) {
+            if (groupBy === "releaseYear") {
+              const numA = parseInt(labelA, 10) || 0;
+              const numB = parseInt(labelB, 10) || 0;
+              return sortDir === "asc" ? numA - numB : numB - numA;
+            }
+            return sortDir === "asc"
+              ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
+              : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
           }
-          return sortDir === "asc"
-            ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
-            : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
+
+          const valA = getGroupSortValue(a[1], sortKey);
+          const valB = getGroupSortValue(b[1], sortKey);
+
+          if (typeof valA === "number" && typeof valB === "number") {
+            return sortDir === "asc" ? valA - valB : valB - valA;
+          }
+
+          const strA = String(valA);
+          const strB = String(valB);
+          const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
+          return sortDir === "asc" ? cmp : -cmp;
         });
       }
       return entries.flatMap(([_, tracks]) => tracks);
@@ -541,18 +581,34 @@ export default function Workspace({
     const entries = Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
 
     if (sortKey !== null) {
-      // Sort the groups themselves alphabetically or numerically based on sortDir
+      // Sort the groups themselves based on the sortKey
       entries.sort((a, b) => {
         const labelA = a.label;
         const labelB = b.label;
-        if (groupBy === "releaseYear") {
-          const numA = parseInt(labelA, 10) || 0;
-          const numB = parseInt(labelB, 10) || 0;
-          return sortDir === "asc" ? numA - numB : numB - numA;
+
+        // If sorting by the groupBy key itself, sort alphabetically
+        if (sortKey === groupBy || (groupBy === "artist" && sortKey === "artist")) {
+          if (groupBy === "releaseYear") {
+            const numA = parseInt(labelA, 10) || 0;
+            const numB = parseInt(labelB, 10) || 0;
+            return sortDir === "asc" ? numA - numB : numB - numA;
+          }
+          return sortDir === "asc"
+            ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
+            : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
         }
-        return sortDir === "asc"
-          ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
-          : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
+
+        const valA = getGroupSortValue(a.tracks, sortKey);
+        const valB = getGroupSortValue(b.tracks, sortKey);
+
+        if (typeof valA === "number" && typeof valB === "number") {
+          return sortDir === "asc" ? valA - valB : valB - valA;
+        }
+
+        const strA = String(valA);
+        const strB = String(valB);
+        const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
+        return sortDir === "asc" ? cmp : -cmp;
       });
     }
 
@@ -572,6 +628,20 @@ export default function Workspace({
       toast.success(`Successfully added ${selectedIds.length} track(s) to playlist.`);
       setPlaylistFlyoutOpen(false);
       setSelected(new Set());
+
+      // Update playlists state to increment the tracks count
+      setPlaylists(prevPlaylists =>
+        prevPlaylists.map(pl => {
+          if (String(pl.id) === String(destPlaylistId)) {
+            const currentCount = getPlaylistTrackCount(pl);
+            return {
+              ...pl,
+              tracks: currentCount + selectedIds.length
+            };
+          }
+          return pl;
+        })
+      );
     } catch (err) {
       console.error(err);
       toast.error("Failed to add tracks. Make sure you own the destination playlist.");
@@ -600,6 +670,20 @@ export default function Workspace({
       });
       if (selectedPlaylistId === "liked") {
         setLikedSongsCount(c => Math.max(0, c - selectedIds.length));
+      } else {
+        // Update playlists state to decrement the tracks count
+        setPlaylists(prevPlaylists =>
+          prevPlaylists.map(pl => {
+            if (String(pl.id) === String(selectedPlaylistId)) {
+              const currentCount = getPlaylistTrackCount(pl);
+              return {
+                ...pl,
+                tracks: Math.max(0, currentCount - selectedIds.length)
+              };
+            }
+            return pl;
+          })
+        );
       }
       toast.success(`Successfully removed ${selectedIds.length} track(s) from this playlist.`);
       setSelected(new Set());

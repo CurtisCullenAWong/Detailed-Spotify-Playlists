@@ -129,7 +129,18 @@ export default function EditPlaylistModal({
           tracks: trackUrisToAdd.length,
           cover: imagePreview || created.images?.[0]?.url || basePlaylist.cover,
           owner: "yours",
+          dateCreated: new Date().toISOString(),
         };
+
+        // Cache the creation date in localStorage
+        try {
+          const stored = localStorage.getItem("spotify-playlist-creation-dates");
+          const dateMap = stored ? JSON.parse(stored) : {};
+          dateMap[String(created.id)] = createdPlaylist.dateCreated;
+          localStorage.setItem("spotify-playlist-creation-dates", JSON.stringify(dateMap));
+        } catch (e) {
+          console.warn("Failed to cache playlist creation date", e);
+        }
 
         setPlaylists(prev => [createdPlaylist, ...prev.filter(p => String(p.id) !== String(createdPlaylist.id))]);
         toast.success("Playlist created successfully!");

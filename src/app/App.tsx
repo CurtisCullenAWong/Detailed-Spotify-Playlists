@@ -23,7 +23,7 @@ import Workspace from "./pages/Workspace/Workspace";
 import ApiReference from "./pages/ApiReference/ApiReference";
 import SearchPage from "./pages/Search/SearchPage";
 import NowPlayingBar from "./components/NowPlayingBar";
-import { getPlaybackTrackId, buildTrackUri } from "../utils/spotifyHelpers";
+import { getPlaybackTrackId, buildTrackUri, getPlaylistTrackCount } from "../utils/spotifyHelpers";
 import { readWorkspaceTrackCache, writeWorkspaceTrackCache } from "../utils/cache";
 import type { WorkspaceTrackCache } from "../utils/cache";
 import type { Track, Playlist, Artist } from "../data";
@@ -34,6 +34,25 @@ export default function App() {
   const preferences = loadPreferences();
   const [page, setPage] = useState<Page>(preferences.currentPage);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(preferences.sidebarCollapsed);
+  const [libraryView, setLibraryView] = useState<"all" | "yours" | "followed">(() => {
+    const saved = localStorage.getItem("spotify-manager-preferences");
+    if (!saved) return "all";
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.libraryView === "yours") {
+        parsed.libraryView = "all";
+        localStorage.setItem("spotify-manager-preferences", JSON.stringify(parsed));
+        return "all";
+      }
+      return parsed.libraryView || "all";
+    } catch (e) {
+      return "all";
+    }
+  });
+
+  useEffect(() => {
+    PreferenceUpdaters.setLibraryView(libraryView);
+  }, [libraryView]);
 
   // Spotify integration state
   const [authenticated, setAuthenticated] = useState<boolean>(false);
@@ -255,11 +274,34 @@ export default function App() {
       }
       const cacheKey = String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic");
       const cachedTracks = playlistTrackCacheRef.current[cacheKey];
+
+      const isCompiledVirtualPlaylist = selectedPlaylistId === "all_my" || selectedPlaylistId === "all_followed" || selectedPlaylistId === "all_songs";
+
+      const syncTrackCount = (count: number) => {
+        if (selectedPlaylistId !== "liked" && !isCompiledVirtualPlaylist) {
+          setPlaylists(prev =>
+            prev.map(p => {
+              if (String(p.id) === String(selectedPlaylistId)) {
+                if (getPlaylistTrackCount(p) !== count) {
+                  return { ...p, tracks: count };
+                }
+              }
+              return p;
+            })
+          );
+        } else if (selectedPlaylistId === "liked") {
+          if (likedSongsCount !== count) {
+            setLikedSongsCount(count);
+          }
+        }
+      };
+
       if (cachedTracks?.length && !forceRefreshRequested && cachedTracks[0].releaseDate !== undefined) {
         if (workspaceLoadSessionRef.current === loadSession) {
           setLoadingTracks(false);
         }
         updatePlaylistTracks(cachedTracks, cacheKey);
+        syncTrackCount(cachedTracks.length);
         return;
       }
 
@@ -285,6 +327,7 @@ export default function App() {
         }
         setWorkspaceLoadProgress(100);
         updatePlaylistTracks(tracks, cacheKey);
+        syncTrackCount(tracks.length);
       } catch (err: any) {
         if (err.name === "AbortError") {
           console.log("Track loading aborted for session:", loadSession);
@@ -452,6 +495,8 @@ export default function App() {
           playingPlaylistId={playingPlaylistId}
           enableDeprecatedApis={enableDeprecatedApis}
           loadingProfile={loadingProfile}
+          libraryView={libraryView}
+          setLibraryView={setLibraryView}
         />
         <main className="flex-1 min-w-0 relative overflow-hidden flex">
           {page === "dashboard" && (
@@ -471,6 +516,8 @@ export default function App() {
               enableDeprecatedApis={enableDeprecatedApis}
               onToggleDeprecatedApis={handleToggleDeprecatedApis}
               loadingProfile={loadingProfile}
+              libraryView={libraryView}
+              setLibraryView={setLibraryView}
             />
           )}
           {page === "workspace" && (
