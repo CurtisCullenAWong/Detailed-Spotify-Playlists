@@ -809,7 +809,7 @@ export async function addTracksToPlaylist(playlistId: string | number, trackUris
 }
 
 export async function removeTracksFromPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
-  await spotifyFetch(`/playlists/${playlistId}/items`, {
+  await spotifyFetch(`/playlists/${playlistId}/tracks`, {
     method: "DELETE",
     body: JSON.stringify({
       tracks: trackUris.map(uri => ({ uri })),

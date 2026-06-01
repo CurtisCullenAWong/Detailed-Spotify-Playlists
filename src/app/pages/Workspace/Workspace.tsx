@@ -197,32 +197,39 @@ export default function Workspace({
     return map;
   }, [orderedPlaylistTracks]);
 
-const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
-  if (!key || tracks.length === 0) return "";
+  const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
+    if (!key || tracks.length === 0) return "";
 
-  const firstTrack = tracks[0];
-  const val = firstTrack[key as keyof Track];
+    const targetKey = key === "duration" ? "durationMs" : key;
+    const firstTrack = tracks[0];
+    const val = firstTrack[targetKey as keyof Track];
 
-  if (typeof val === "number") {
-    // For numeric fields, return the average value in the group
-    const sum = tracks.reduce((acc, t) => {
-      const v = t[key as keyof Track];
-      return acc + (typeof v === "number" ? v : 0);
-    }, 0);
-    return sum / tracks.length;
-  }
+    if (typeof val === "number" && targetKey !== "releaseYear") {
+      // For numeric fields (except releaseYear), return the average value in the group
+      const sum = tracks.reduce((acc, t) => {
+        const v = t[targetKey as keyof Track];
+        return acc + (typeof v === "number" ? v : 0);
+      }, 0);
+      return sum / tracks.length;
+    }
 
-  if (key === "releaseDate") {
-    const dates = tracks.map(t => t.releaseDate || String(t.releaseYear || "")).filter(Boolean);
-    if (dates.length === 0) return "";
-    return dates[0];
-  }
+    if (key === "releaseDate" || key === "releaseYear") {
+      const dates = tracks.map(t => t.releaseDate || String(t.releaseYear || "")).filter(Boolean);
+      if (dates.length === 0) return "";
+      return dates[0];
+    }
 
-  return String(val || "");
-};
+    if (key === "dateAdded") {
+      const dates = tracks.map(t => t.dateAdded).filter(Boolean);
+      if (dates.length === 0) return "";
+      return dates[0];
+    }
+
+    return String(val || "");
+  };
 
   const sortedPlaylistTracks = React.useMemo(() => {
-    let base = [...playlistTracks];
+    let base = playlistTracks.filter(Boolean);
     if (sortKey) {
       base.sort((a, b) => {
         const va = a[sortKey as keyof Track];
@@ -254,7 +261,7 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
         return sortDir === "asc" ? cmp : -cmp;
       });
     } else {
-      base = [...orderedPlaylistTracks];
+      base = orderedPlaylistTracks.filter(Boolean);
     }
 
     if (groupBy !== "none") {
@@ -265,7 +272,21 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
         map.get(key)!.push(t);
       }
       const entries = Array.from(map.entries());
-      if (sortKey !== null) {
+      
+      if (sortKey === null) {
+        if (!canReorderGroups) {
+          entries.sort((a, b) => {
+            const labelA = a[0];
+            const labelB = b[0];
+            if (groupBy === "releaseYear") {
+              const numA = parseInt(labelA, 10) || 0;
+              const numB = parseInt(labelB, 10) || 0;
+              return numA - numB;
+            }
+            return labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
+          });
+        }
+      } else {
         entries.sort((a, b) => {
           const labelA = a[0];
           const labelB = b[0];
@@ -285,9 +306,14 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
           const valA = getGroupSortValue(a[1], sortKey);
           const valB = getGroupSortValue(b[1], sortKey);
 
-          if (typeof valA === "number" && typeof valB === "number") {
-            return sortDir === "asc" ? valA - valB : valB - valA;
+          const isNumA = typeof valA === "number" && !isNaN(valA);
+          const isNumB = typeof valB === "number" && !isNaN(valB);
+
+          if (isNumA && isNumB) {
+            return sortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
           }
+          if (isNumA) return -1;
+          if (isNumB) return 1;
 
           const strA = String(valA);
           const strB = String(valB);
@@ -299,7 +325,7 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
     }
 
     return base;
-  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, groupBy, trackIndices]);
+  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, groupBy, trackIndices, canReorderGroups]);
 
   const targetTrackOrder = sortedPlaylistTracks.map(getTrackOrderKey);
   const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
@@ -452,31 +478,16 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
   const toggleSort = (key: SortKey) => {
     if (!key) return;
 
-    // Trigger visual sorting loading bar animation
-    setSortingProgress(0);
-    let current = 0;
-    const interval = setInterval(() => {
-      current += 20;
-      if (current >= 100) {
-        clearInterval(interval);
-
-        // Apply the actual sort at the end of the animation
-        if (sortKey === key) {
-          if (sortDir === "asc") {
-            setSortDir("desc");
-          } else {
-            setSortKey(null);
-          }
-        } else {
-          setSortKey(key);
-          setSortDir("asc");
-        }
-
-        setSortingProgress(null);
+    if (sortKey === key) {
+      if (sortDir === "asc") {
+        setSortDir("desc");
       } else {
-        setSortingProgress(current);
+        setSortKey(null);
       }
-    }, 40); // 200ms total duration
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   };
 
   const handleSavePlaylistOrder = async () => {
@@ -534,15 +545,21 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
     const idx = playSequence.findIndex(t => String(t.id) === String(id));
 
     if (e.shiftKey && lastClickedIndexRef.current !== null && idx !== -1) {
+      const anchorTrack = playSequence[lastClickedIndexRef.current];
+      const anchorSelected = anchorTrack ? selected.has(anchorTrack.id) : false;
+
       const start = Math.min(lastClickedIndexRef.current, idx);
       const end = Math.max(lastClickedIndexRef.current, idx);
       const idsInRange = playSequence.slice(start, end + 1).map(t => t.id);
-      const isRangeFullySelected = idsInRange.every(trackId => selected.has(trackId));
+
       setSelected(prev => {
         const next = new Set(prev);
         idsInRange.forEach(trackId => {
-          if (isRangeFullySelected) next.delete(trackId);
-          else next.add(trackId);
+          if (anchorSelected) {
+            next.add(trackId);
+          } else {
+            next.delete(trackId);
+          }
         });
         return next;
       });
@@ -574,14 +591,27 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
     if (groupBy === "none") return [{ label: "", tracks: sorted }];
     const map = new Map<string, Track[]>();
     for (const t of sorted) {
+      if (!t) continue;
       const key = groupBy === "artist" ? (t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist") : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
     const entries = Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
 
-    if (sortKey !== null) {
-      // Sort the groups themselves based on the sortKey
+    if (sortKey === null) {
+      if (!canReorderGroups) {
+        entries.sort((a, b) => {
+          const labelA = a.label;
+          const labelB = b.label;
+          if (groupBy === "releaseYear") {
+            const numA = parseInt(labelA, 10) || 0;
+            const numB = parseInt(labelB, 10) || 0;
+            return numA - numB;
+          }
+          return labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
+        });
+      }
+    } else {
       entries.sort((a, b) => {
         const labelA = a.label;
         const labelB = b.label;
@@ -601,9 +631,14 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
         const valA = getGroupSortValue(a.tracks, sortKey);
         const valB = getGroupSortValue(b.tracks, sortKey);
 
-        if (typeof valA === "number" && typeof valB === "number") {
-          return sortDir === "asc" ? valA - valB : valB - valA;
+        const isNumA = typeof valA === "number" && !isNaN(valA);
+        const isNumB = typeof valB === "number" && !isNaN(valB);
+
+        if (isNumA && isNumB) {
+          return sortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
         }
+        if (isNumA) return -1;
+        if (isNumB) return 1;
 
         const strA = String(valA);
         const strB = String(valB);
@@ -782,17 +817,11 @@ const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
   };
 
   const ColHeader = ({ col, label }: { col: ColId; label: string }) => (
-    <th
-      draggable
-      onDragStart={() => handleColDragStart(col)}
-      onDragEnter={() => handleColDragEnter(col)}
-      onDragEnd={handleColDragEnd}
-      onDragOver={e => e.preventDefault()}
-      className={`group px-3 py-3 text-left text-[10px] uppercase tracking-widest font-semibold cursor-grab active:cursor-grabbing transition-colors select-none ${col === "dateAdded" ? "min-w-[160px]" : col === "releaseDate" ? "min-w-[130px]" : ""} ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}>
+    <th className="p-0 select-none text-[10px] font-semibold uppercase tracking-widest text-[#B3B3B3]">
       <button
         type="button"
         onClick={() => toggleSort(col as SortKey)}
-        className="flex items-center gap-1 text-left"
+        className={`group w-full h-full px-3 py-3 flex items-center gap-1 text-left cursor-pointer transition-colors ${col === "dateAdded" ? "min-w-[160px]" : col === "releaseDate" ? "min-w-[130px]" : ""} ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}
       >
         {col === "energy" ? "Energy" : col === "bpm" ? "BPM" : label}
         {sortKey === col

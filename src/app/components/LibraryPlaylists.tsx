@@ -190,29 +190,14 @@ export default function LibraryPlaylists({
       });
 
   const toggleSort = (key: PlSortKey) => {
-    // Trigger visual sorting loading bar animation
-    setSortingProgress(0);
-    let current = 0;
-    const interval = setInterval(() => {
-      current += 20;
-      if (current >= 100) {
-        clearInterval(interval);
-
-        // Apply the actual sort at the end of the animation
-        if (key === "none") {
-          setSortKey("none");
-        } else if (sortKey === key) {
-          setSortDir(prev => prev === "asc" ? "desc" : "asc");
-        } else {
-          setSortKey(key);
-          setSortDir("asc");
-        }
-
-        setSortingProgress(null);
-      } else {
-        setSortingProgress(current);
-      }
-    }, 40); // 200ms total duration
+    if (key === "none") {
+      setSortKey("none");
+    } else if (sortKey === key) {
+      setSortDir(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   };
 
   // Drag and drop handlers

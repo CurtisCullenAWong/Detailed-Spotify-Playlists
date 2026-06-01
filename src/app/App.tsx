@@ -279,16 +279,16 @@ export default function App() {
 
       const syncTrackCount = (count: number) => {
         if (selectedPlaylistId !== "liked" && !isCompiledVirtualPlaylist) {
-          setPlaylists(prev =>
-            prev.map(p => {
+          setPlaylists(prev => {
+            const hasChange = prev.some(p => String(p.id) === String(selectedPlaylistId) && getPlaylistTrackCount(p) !== count);
+            if (!hasChange) return prev;
+            return prev.map(p => {
               if (String(p.id) === String(selectedPlaylistId)) {
-                if (getPlaylistTrackCount(p) !== count) {
-                  return { ...p, tracks: count };
-                }
+                return { ...p, tracks: count };
               }
               return p;
-            })
-          );
+            });
+          });
         } else if (selectedPlaylistId === "liked") {
           if (likedSongsCount !== count) {
             setLikedSongsCount(count);
