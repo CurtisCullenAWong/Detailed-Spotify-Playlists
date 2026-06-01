@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Code2,
   RadioTower,
+  X,
 } from "lucide-react";
 import type { Playlist } from "../../data";
 import { loadPreferences, PreferenceUpdaters } from "../../utils/userPreferences";
@@ -31,6 +32,8 @@ interface SidebarProps {
   loadingProfile?: boolean;
   libraryView: "all" | "yours" | "followed";
   setLibraryView: (view: "all" | "yours" | "followed") => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export default function Sidebar({
@@ -47,6 +50,8 @@ export default function Sidebar({
   loadingProfile,
   libraryView,
   setLibraryView,
+  mobileOpen,
+  onCloseMobile,
 }: SidebarProps) {
   const [, setLibraryDropdownOpen] = useState(false);
   const libraryDropdownRef = useRef<HTMLDivElement>(null);
@@ -73,7 +78,7 @@ export default function Sidebar({
       ? visiblePlaylists
       : visiblePlaylists.filter(pl => pl.owner === libraryView);
 
-  if (collapsed) {
+  if (collapsed && !mobileOpen) {
     return (
       <aside className="hidden md:flex flex-col h-full w-[60px] shrink-0 bg-[#121212] border-r border-[#282828] select-none items-center py-4 gap-2 overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
         <button onClick={onToggleCollapse} aria-label="Toggle sidebar" className="w-9 h-9 flex items-center justify-center mb-2 shrink-0 hover:scale-105 transition-all overflow-hidden">
@@ -167,55 +172,82 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="hidden md:flex flex-col h-full w-[260px] shrink-0 bg-[#121212] border-r border-[#282828] select-none overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
-      {/* Brand */}
-      <div className="px-4 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <button onClick={onToggleCollapse} aria-label="Toggle sidebar" className="w-8 h-8 flex items-center justify-center shrink-0 hover:scale-105 transition-all overflow-hidden">
-            <img src="/favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
-          </button>
-          <span className="text-white font-bold text-[15px] tracking-tight">Spotify Manager</span>
-          <button onClick={onToggleCollapse} className="ml-auto text-[#B3B3B3] hover:text-white transition-colors p-1 rounded hover:bg-[#282828]">
-            <ChevronRight size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Primary Nav */}
-      <nav className="px-3 space-y-0.5">
-        {NAV.map(({ icon: Icon, label, id }) => (
-          <button key={label} onClick={() => setPage(id)}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${id === page ? "text-white bg-[#1a1a1a]" : "text-[#B3B3B3] hover:text-white"}`}>
-            <Icon size={20} className={id === page ? "text-white" : "text-[#B3B3B3]"} />
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      {/* Library Panel */}
-      <div className="mt-2 pt-2 border-t border-[#282828] flex-1 overflow-hidden flex flex-col min-h-0">
-        <LibraryPlaylists
-          onOpen={() => setPage("workspace")}
-          selectedView={libraryView}
-          setSelectedView={setLibraryView}
-          playlists={playlists}
-          likedSongsCount={likedSongsCount}
-          selectedPlaylistId={selectedPlaylistId}
-          setSelectedPlaylistId={setSelectedPlaylistId}
-          playingPlaylistId={playingPlaylistId}
-          enableDeprecatedApis={enableDeprecatedApis}
-          loadingProfile={loadingProfile}
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden cursor-pointer"
+          onClick={onCloseMobile}
         />
-
-        {/* API Reference link */}
-        <div className="px-4 pb-3 pt-2 border-t border-[#282828] mt-auto">
-          <button onClick={() => setPage("api")}
-            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${page === "api" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
-            <Code2 size={14} />
-            API Reference
-          </button>
+      )}
+      <aside
+        className={`
+          flex flex-col h-full shrink-0 bg-[#121212] border-r border-[#282828] select-none overflow-hidden transition-all duration-300
+          ${mobileOpen
+            ? "fixed inset-y-0 left-0 w-[260px] z-50 translate-x-0"
+            : "hidden md:flex md:w-[260px] -translate-x-full md:translate-x-0"
+          }
+        `}
+        style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
+      >
+        {/* Brand */}
+        <div className="px-4 pt-4 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 flex items-center justify-center shrink-0">
+              <img src="/favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
+            </div>
+            <span className="text-white font-bold text-[15px] tracking-tight">Spotify Manager</span>
+            
+            {/* Close button on mobile, Collapse button on desktop */}
+            <button
+              onClick={mobileOpen ? onCloseMobile : onToggleCollapse}
+              className="ml-auto text-[#B3B3B3] hover:text-white transition-colors p-1 rounded hover:bg-[#282828]"
+              aria-label={mobileOpen ? "Close sidebar" : "Collapse sidebar"}
+            >
+              {mobileOpen ? <X size={16} /> : <ChevronRight size={14} />}
+            </button>
+          </div>
         </div>
-      </div>
-    </aside>
+
+        {/* Primary Nav */}
+        <nav className="px-3 space-y-0.5">
+          {NAV.map(({ icon: Icon, label, id }) => (
+            <button key={label} onClick={() => { setPage(id); onCloseMobile?.(); }}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${id === page ? "text-white bg-[#1a1a1a]" : "text-[#B3B3B3] hover:text-white"}`}>
+              <Icon size={20} className={id === page ? "text-white" : "text-[#B3B3B3]"} />
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Library Panel */}
+        <div className="mt-2 pt-2 border-t border-[#282828] flex-1 overflow-hidden flex flex-col min-h-0">
+          <LibraryPlaylists
+            onOpen={() => {
+              setPage("workspace");
+              onCloseMobile?.();
+            }}
+            selectedView={libraryView}
+            setSelectedView={setLibraryView}
+            playlists={playlists}
+            likedSongsCount={likedSongsCount}
+            selectedPlaylistId={selectedPlaylistId}
+            setSelectedPlaylistId={setSelectedPlaylistId}
+            playingPlaylistId={playingPlaylistId}
+            enableDeprecatedApis={enableDeprecatedApis}
+            loadingProfile={loadingProfile}
+          />
+
+          {/* API Reference link */}
+          <div className="px-4 pb-3 pt-2 border-t border-[#282828] mt-auto">
+            <button onClick={() => { setPage("api"); onCloseMobile?.(); }}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${page === "api" ? "text-white bg-[#282828]" : "text-[#B3B3B3] hover:text-white hover:bg-[#282828]"}`}>
+              <Code2 size={14} />
+              API Reference
+            </button>
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }

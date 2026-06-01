@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Search, X, Music2, Mic2, Play, MoreHorizontal } from "lucide-react";
+import { Search, X, Music2, Mic2, Play, MoreHorizontal, Menu } from "lucide-react";
 import { toast } from "sonner";
 import type { Artist, Track, Playlist } from "../../../data";
 import { SEARCH_FILTERS, BROWSE_CATEGORIES } from "../../../data";
@@ -12,6 +12,7 @@ interface SearchPageProps {
   currentPlaybackTrackId: string | null;
   query: string;
   setQuery: (q: string) => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export default function SearchPage({
@@ -19,6 +20,7 @@ export default function SearchPage({
   currentPlaybackTrackId,
   query,
   setQuery,
+  onToggleMobileSidebar,
 }: SearchPageProps) {
   const [activeFilter, setActiveFilter] = useState<"all" | "tracks" | "artists" | "playlists" | "albums">("all");
   const [loading, setLoading] = useState(false);
@@ -72,7 +74,19 @@ export default function SearchPage({
   return (
     <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Sticky search bar */}
-      <div className="sticky top-0 z-20 bg-[#121212]/95 backdrop-blur-sm px-8 pt-6 pb-4 border-b border-[#282828]/60">
+      <div className="sticky top-0 z-20 bg-[#121212]/95 backdrop-blur-sm px-4 md:px-8 pt-4 md:pt-6 pb-4 border-b border-[#282828]/60 flex flex-col gap-3">
+        {/* Mobile top-bar */}
+        <div className="md:hidden flex items-center justify-between">
+          <button
+            onClick={onToggleMobileSidebar}
+            className="p-1 -ml-1 text-[#B3B3B3] hover:text-white transition-colors cursor-pointer shrink-0"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="text-white/60 font-semibold text-[13px]">Search</span>
+          <div className="w-6" />
+        </div>
         <div className="relative max-w-xl">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#B3B3B3]" />
           <input

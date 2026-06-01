@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { Code2, ListMusic, RadioTower, Laptop2, X, ChevronDown } from "lucide-react";
+import { Code2, ListMusic, RadioTower, Laptop2, X, ChevronDown, Menu } from "lucide-react";
 import { API_SECTIONS } from "../../../data";
 import { loadPreferences, PreferenceUpdaters } from "../../../utils/userPreferences";
 import MethodBadge from "./components/MethodBadge";
 
 interface ApiReferenceProps {
   enableDeprecatedApis: boolean;
+  onToggleMobileSidebar?: () => void;
 }
 
-export default function ApiReference({ enableDeprecatedApis }: ApiReferenceProps) {
+export default function ApiReference({ enableDeprecatedApis, onToggleMobileSidebar }: ApiReferenceProps) {
   const preferences = loadPreferences();
   const [openSection, setOpenSection] = useState<string>(preferences.apiOpenSection || "User Profiles & Activity");
   const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(preferences.apiExpandedEndpoint);
@@ -23,7 +24,23 @@ export default function ApiReference({ enableDeprecatedApis }: ApiReferenceProps
   return (
     <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Header */}
-      <div className="bg-gradient-to-b from-[#0d2a1a] to-[#121212] px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 border-b border-[#282828]">
+      <div className="bg-gradient-to-b from-[#0d2a1a] to-[#121212] px-4 md:px-8 pt-4 md:pt-8 pb-5 md:pb-6 border-b border-[#282828] flex flex-col gap-4">
+        {/* Mobile top-bar */}
+        <div className="md:hidden flex items-center justify-between">
+          <button
+            onClick={onToggleMobileSidebar}
+            className="p-1 -ml-1 text-[#B3B3B3] hover:text-white transition-colors cursor-pointer shrink-0"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="text-white/60 font-semibold text-[13px]">API Reference</span>
+          <button
+            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            className="w-8 h-8 flex items-center justify-center rounded bg-[#282828] text-white">
+            <ListMusic size={16} />
+          </button>
+        </div>
         <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
           <div className="w-10 h-10 md:w-12 md:h-12 bg-[#1DB954]/20 rounded-lg flex items-center justify-center border border-[#1DB954]/30">
             <Code2 size={20} className="md:hidden text-[#1DB954]" />
@@ -33,11 +50,6 @@ export default function ApiReference({ enableDeprecatedApis }: ApiReferenceProps
             <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Postman Collection</p>
             <h1 className="text-white text-[20px] md:text-[26px] font-extrabold leading-tight">Spotify API Reference</h1>
           </div>
-          <button
-            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-            className="md:hidden w-9 h-9 flex items-center justify-center rounded-md bg-[#282828] text-white">
-            <ListMusic size={18} />
-          </button>
         </div>
         <p className="text-[#B3B3B3] text-[13px] max-w-2xl">Complete endpoint reference for the Spotify Web API. All requests require <code className="text-[#1DB954] bg-[#1DB954]/10 px-1.5 py-0.5 rounded text-[12px] font-mono">Authorization: Bearer {"{{access_token}}"}</code> in the request header.</p>
         <div className="flex items-center gap-6 mt-4">
@@ -118,7 +130,7 @@ export default function ApiReference({ enableDeprecatedApis }: ApiReferenceProps
                               </div>
                             )}
                             <p className="text-[#B3B3B3] text-[13px] mb-4 leading-relaxed">{ep.desc}</p>
-                            
+
                             {/* Request Headers Section */}
                             <div className="mb-4">
                               <p className="text-[10px] font-bold uppercase tracking-widest text-[#535353] mb-2">Request Headers</p>

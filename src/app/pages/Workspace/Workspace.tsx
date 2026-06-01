@@ -19,6 +19,7 @@ import {
   Music2,
   Zap,
   RefreshCw,
+  Menu,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Playlist, Track, GroupByOption } from "../../../data";
@@ -83,6 +84,7 @@ interface WorkspaceProps {
   currentPlaybackTrackId: string | null;
   enableDeprecatedApis: boolean;
   setPlayingPlaylistId: (id: string | number | null) => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export default function Workspace({
@@ -101,6 +103,7 @@ export default function Workspace({
   currentPlaybackTrackId,
   enableDeprecatedApis,
   setPlayingPlaylistId,
+  onToggleMobileSidebar,
 }: WorkspaceProps) {
   const preferences = loadPreferences();
 
@@ -861,7 +864,19 @@ export default function Workspace({
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#121212] overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Header */}
-      <div className="bg-gradient-to-b from-[#2a1a4e] to-[#121212] px-4 md:px-8 pt-6 md:pt-8 pb-5 md:pb-6 shrink-0">
+      <div className="bg-gradient-to-b from-[#2a1a4e] to-[#121212] px-4 md:px-8 pt-4 md:pt-8 pb-5 md:pb-6 shrink-0 flex flex-col gap-4">
+        {/* Mobile top-bar */}
+        <div className="md:hidden flex items-center justify-between">
+          <button
+            onClick={onToggleMobileSidebar}
+            className="p-1 -ml-1 text-[#B3B3B3] hover:text-white transition-colors cursor-pointer shrink-0"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="text-white/60 font-semibold text-[13px]">Library</span>
+          <div className="w-6" />
+        </div>
         <div className="flex items-end gap-4 md:gap-6">
           <div
             className="w-[80px] h-[80px] md:w-[100px] md:h-[100px] rounded-lg flex items-center justify-center shadow-2xl shrink-0 overflow-hidden bg-[#282828] relative"

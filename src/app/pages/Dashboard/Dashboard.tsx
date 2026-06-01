@@ -11,6 +11,7 @@ import {
   ListMusic,
   RadioTower,
   Heart,
+  Menu,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Playlist, Artist } from "../../../data";
@@ -46,6 +47,7 @@ interface DashboardProps {
   loadingProfile?: boolean;
   libraryView: "all" | "yours" | "followed";
   setLibraryView: (view: "all" | "yours" | "followed") => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export default function Dashboard({
@@ -65,6 +67,7 @@ export default function Dashboard({
   loadingProfile,
   libraryView,
   setLibraryView,
+  onToggleMobileSidebar,
 }: DashboardProps) {
   const [hoveredPlaylist, setHoveredPlaylist] = useState<string | number | null>(null);
   const [headerDropdownOpen, setHeaderDropdownOpen] = useState(false);
@@ -156,6 +159,13 @@ export default function Dashboard({
       {/* Top bar */}
       <div className="sticky top-0 z-10 flex items-center justify-between px-4 md:px-8 py-3 md:py-4 bg-gradient-to-b from-[#1a1a2e]/95 to-transparent backdrop-blur-sm">
         <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onToggleMobileSidebar}
+            className="md:hidden p-1 -ml-1 text-[#B3B3B3] hover:text-white transition-colors cursor-pointer shrink-0"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
           <h1 className="text-white text-[18px] md:text-[22px] font-bold truncate">
             {(() => {
               const hour = new Date().getHours();

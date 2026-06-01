@@ -34,6 +34,7 @@ export default function App() {
   const preferences = loadPreferences();
   const [page, setPage] = useState<Page>(preferences.currentPage);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(preferences.sidebarCollapsed);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [libraryView, setLibraryView] = useState<"all" | "yours" | "followed">(() => {
     const saved = localStorage.getItem("spotify-manager-preferences");
     if (!saved) return "all";
@@ -497,6 +498,8 @@ export default function App() {
           loadingProfile={loadingProfile}
           libraryView={libraryView}
           setLibraryView={setLibraryView}
+          mobileOpen={mobileSidebarOpen}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
         />
         <main className="flex-1 min-w-0 relative overflow-hidden flex">
           {page === "dashboard" && (
@@ -518,6 +521,7 @@ export default function App() {
               loadingProfile={loadingProfile}
               libraryView={libraryView}
               setLibraryView={setLibraryView}
+              onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
             />
           )}
           {page === "workspace" && (
@@ -537,32 +541,26 @@ export default function App() {
               currentPlaybackTrackId={currentPlaybackTrackId}
               enableDeprecatedApis={enableDeprecatedApis}
               setPlayingPlaylistId={setPlayingPlaylistId}
+              onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
             />
           )}
-          {page === "api" && <ApiReference enableDeprecatedApis={enableDeprecatedApis} />}
-          {page === "search" && <SearchPage topArtists={topArtists} currentPlaybackTrackId={currentPlaybackTrackId} query={searchQuery} setQuery={setSearchQuery} />}
+          {page === "api" && (
+            <ApiReference
+              enableDeprecatedApis={enableDeprecatedApis}
+              onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+            />
+          )}
+          {page === "search" && (
+            <SearchPage
+              topArtists={topArtists}
+              currentPlaybackTrackId={currentPlaybackTrackId}
+              query={searchQuery}
+              setQuery={setSearchQuery}
+              onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+            />
+          )}
         </main>
       </div>
-
-      {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden flex items-center justify-around bg-[#000000] border-t border-[#282828] h-16 shrink-0 z-30">
-        <button onClick={() => setPage("dashboard")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "dashboard" ? "text-white" : "text-[#B3B3B3]"}`}>
-          <Home size={20} />
-          <span className="text-[10px] font-semibold">Home</span>
-        </button>
-        <button onClick={() => setPage("search")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "search" ? "text-white" : "text-[#B3B3B3]"}`}>
-          <Search size={20} />
-          <span className="text-[10px] font-semibold">Search</span>
-        </button>
-        <button onClick={() => setPage("workspace")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "workspace" ? "text-white" : "text-[#B3B3B3]"}`}>
-          <Library size={20} />
-          <span className="text-[10px] font-semibold">Library</span>
-        </button>
-        <button onClick={() => setPage("api")} className={`flex flex-col items-center gap-1 py-2 px-3 ${page === "api" ? "text-white" : "text-[#B3B3B3]"}`}>
-          <Code2 size={20} />
-          <span className="text-[10px] font-semibold">API</span>
-        </button>
-      </nav>
 
       <NowPlayingBar playbackState={playbackState} setPlaybackState={setPlaybackState} />
     </div>
