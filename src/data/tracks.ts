@@ -11,6 +11,7 @@ export interface Track {
   releaseYear: number;
   releaseDate?: string;
   dateAdded: string;
+  trackNumber?: number;
   bpm?: number;
   energy?: number;
   popularity: number;

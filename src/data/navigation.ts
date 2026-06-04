@@ -12,13 +12,14 @@ export interface NavItem {
 // This file exports types for consistency
 
 export interface ColumnDefinition {
-  id: "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+  id: "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness" | "trackNumber";
   label: string;
   groupable?: boolean;
 }
 
 export const ALL_COLUMNS: ColumnDefinition[] = [
   { id: "title", label: "Title" },
+  { id: "trackNumber", label: "Track #" },
   { id: "artist", label: "Artists", groupable: true },
   { id: "album", label: "Album", groupable: true },
   { id: "genre", label: "Genre", groupable: true },

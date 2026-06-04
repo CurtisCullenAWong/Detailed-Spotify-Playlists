@@ -376,6 +376,7 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
       releaseYear: t.album?.release_date ? new Date(t.album.release_date).getFullYear() : 2024,
       releaseDate: t.album?.release_date || "",
       dateAdded: t.added_at ? t.added_at.split("T")[0] : new Date().toISOString().split("T")[0],
+      trackNumber: t.track_number ?? 0,
       bpm: features?.tempo ? Math.round(features.tempo) : undefined,
       energy: features?.energy !== undefined ? Number(features.energy.toFixed(3)) : undefined,
       popularity: t.popularity ?? 0,

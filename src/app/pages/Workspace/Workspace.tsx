@@ -12,7 +12,6 @@ import {
   Volume2,
   Pencil,
   Search,
-  GripVertical,
   Play,
   Heart,
   RadioTower,
@@ -68,6 +67,136 @@ const compareTracks = (a: Track, b: Track, key: SortKey, dir: SortDir): number =
   return dir === "asc" ? cmp : -cmp;
 };
 
+const GROUP_SORT_OPTIONS = [
+  { id: "name", label: "Group Name" },
+  { id: "count", label: "Track Count" },
+  { id: "popularity", label: "Popularity" },
+  { id: "releaseDate", label: "Release Date" },
+  { id: "dateAdded", label: "Date Added" },
+  { id: "duration", label: "Duration" },
+  { id: "bpm", label: "BPM" },
+  { id: "energy", label: "Energy" },
+  { id: "danceability", label: "Danceability" },
+  { id: "valence", label: "Valence" },
+  { id: "acousticness", label: "Acousticness" },
+  { id: "instrumentalness", label: "Instrumentalness" },
+  { id: "speechiness", label: "Speechiness" },
+  { id: "liveness", label: "Liveness" },
+  { id: "loudness", label: "Loudness" },
+];
+
+const compareGroups = (
+  labelA: string,
+  tracksA: Track[],
+  labelB: string,
+  tracksB: Track[],
+  groupByField: GroupBy,
+  sortKey: string,
+  dir: SortDir,
+  trackIndices?: Map<Track, number>
+): number => {
+  if (sortKey === "custom" && trackIndices) {
+    const getMinIndex = (tracks: Track[]) => {
+      if (tracks.length === 0) return Infinity;
+      let minIdx = Infinity;
+      for (const t of tracks) {
+        const idx = trackIndices.get(t) ?? Infinity;
+        if (idx < minIdx) minIdx = idx;
+      }
+      return minIdx;
+    };
+    const valA = getMinIndex(tracksA);
+    const valB = getMinIndex(tracksB);
+    return dir === "asc" ? valA - valB : valB - valA;
+  }
+
+  if (sortKey === "name") {
+    let cmp = 0;
+    if (groupByField === "releaseYear") {
+      const numA = parseInt(labelA, 10) || 0;
+      const numB = parseInt(labelB, 10) || 0;
+      cmp = numA - numB;
+    } else {
+      cmp = labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
+    }
+    return dir === "asc" ? cmp : -cmp;
+  }
+
+  if (sortKey === "count") {
+    const valA = tracksA.length;
+    const valB = tracksB.length;
+    return dir === "asc" ? valA - valB : valB - valA;
+  }
+
+  if (sortKey === "duration") {
+    const valA = tracksA.reduce((sum, t) => sum + (t.durationMs || 0), 0);
+    const valB = tracksB.reduce((sum, t) => sum + (t.durationMs || 0), 0);
+    return dir === "asc" ? valA - valB : valB - valA;
+  }
+
+  if (sortKey === "releaseDate") {
+    const getAvgDate = (tracks: Track[]) => {
+      if (tracks.length === 0) return 0;
+      let sum = 0;
+      let count = 0;
+      for (const t of tracks) {
+        const dateStr = t.releaseDate || (t.releaseYear ? `${t.releaseYear}-01-01` : null);
+        if (dateStr) {
+          const ms = Date.parse(dateStr);
+          if (!isNaN(ms)) {
+            sum += ms;
+            count++;
+          }
+        }
+      }
+      return count > 0 ? sum / count : 0;
+    };
+    const valA = getAvgDate(tracksA);
+    const valB = getAvgDate(tracksB);
+    return dir === "asc" ? valA - valB : valB - valA;
+  }
+
+  if (sortKey === "dateAdded") {
+    const getAvgDateAdded = (tracks: Track[]) => {
+      if (tracks.length === 0) return 0;
+      let sum = 0;
+      let count = 0;
+      for (const t of tracks) {
+        if (t.dateAdded) {
+          const ms = Date.parse(t.dateAdded);
+          if (!isNaN(ms)) {
+            sum += ms;
+            count++;
+          }
+        }
+      }
+      return count > 0 ? sum / count : 0;
+    };
+    const valA = getAvgDateAdded(tracksA);
+    const valB = getAvgDateAdded(tracksB);
+    return dir === "asc" ? valA - valB : valB - valA;
+  }
+
+  const getAvgField = (tracks: Track[], key: keyof Track) => {
+    if (tracks.length === 0) return 0;
+    let sum = 0;
+    let count = 0;
+    for (const t of tracks) {
+      const val = t[key];
+      if (typeof val === "number") {
+        sum += val;
+        count++;
+      }
+    }
+    return count > 0 ? sum / count : 0;
+  };
+
+  const fieldKey = sortKey as keyof Track;
+  const valA = getAvgField(tracksA, fieldKey);
+  const valB = getAvgField(tracksB, fieldKey);
+  return dir === "asc" ? valA - valB : valB - valA;
+};
+
 interface WorkspaceProps {
   playlists: Playlist[];
   setPlaylists: React.Dispatch<React.SetStateAction<Playlist[]>>;
@@ -92,7 +221,6 @@ export default function Workspace({
   setPlaylists,
   currentUserId,
   selectedPlaylistId,
-  setSelectedPlaylistId,
   playlistTracks,
   loadingTracks,
   loadingTracksProgress,
@@ -112,15 +240,18 @@ export default function Workspace({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createModalTrackUris, setCreateModalTrackUris] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>(preferences.workspaceGroupBy);
+  const [groupByDir, setGroupByDir] = useState<SortDir>(preferences.workspaceGroupByDir ?? "asc");
+  const [groupBySortKey, setGroupBySortKey] = useState<string>(preferences.workspaceGroupBySortKey ?? "name");
+  const [subGroupBy, setSubGroupBy] = useState<GroupBy>(preferences.workspaceSubGroupBy ?? "none");
+  const [subGroupByDir, setSubGroupByDir] = useState<SortDir>(preferences.workspaceSubGroupByDir ?? "asc");
+  const [subGroupBySortKey, setSubGroupBySortKey] = useState<string>(preferences.workspaceSubGroupBySortKey ?? "name");
+  const [subGroupByOpen, setSubGroupByOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>(preferences.workspaceSortKey as SortKey);
   const [sortDir, setSortDir] = useState<SortDir>(preferences.workspaceSortDir);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const lastClickedIndexRef = useRef<number | null>(null);
   const [sortingProgress, setSortingProgress] = useState<number | null>(null);
   const [groupByOpen, setGroupByOpen] = useState(false);
-  const [hoveredGroupBy, setHoveredGroupBy] = useState<GroupBy | null>(null);
-  const [subSortKey, setSubSortKey] = useState<SortKey>(null);
-  const [subSortDir, setSubSortDir] = useState<SortDir>("asc");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [playlistFlyoutOpen, setPlaylistFlyoutOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -135,7 +266,34 @@ export default function Workspace({
   const groupDragItemRef = useRef<string | null>(null);
   const groupDragOverRef = useRef<string | null>(null);
 
-  type ColId = "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+  type ColId = "title" | "trackNumber" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+
+  const colMinWidths: Record<ColId, string> = {
+    title: "min-w-[220px]",
+    trackNumber: "min-w-[120px]",
+    artist: "min-w-[150px]",
+    album: "min-w-[150px]",
+    genre: "min-w-[120px]",
+    releaseYear: "min-w-[90px]",
+    releaseDate: "min-w-[130px]",
+    dateAdded: "min-w-[160px]",
+    bpm: "min-w-[80px]",
+    popularity: "min-w-[120px]",
+    duration: "min-w-[90px]",
+    energy: "min-w-[115px]",
+    danceability: "min-w-[115px]",
+    valence: "min-w-[115px]",
+    acousticness: "min-w-[115px]",
+    instrumentalness: "min-w-[115px]",
+    speechiness: "min-w-[115px]",
+    liveness: "min-w-[115px]",
+    loudness: "min-w-[95px]"
+  };
+
+  const isColCentered = (col: ColId): boolean => {
+    return col !== "title" && col !== "artist" && col !== "album" && col !== "genre";
+  };
+
   const [columnOrder, setColumnOrder] = useState<ColId[]>(preferences.workspaceColumnOrder as ColId[]);
   const [visibleCols, setVisibleCols] = useState<Set<ColId>>(new Set(preferences.workspaceVisibleColumns as ColId[]));
   const dragColRef = useRef<ColId | null>(null);
@@ -147,6 +305,13 @@ export default function Workspace({
   ]), []);
 
   const GROUPABLE_COLUMNS = React.useMemo(() => ALL_COLUMNS.filter((column) => column.groupable), []);
+
+  const visibleGroupSortOptions = React.useMemo(() => {
+    return GROUP_SORT_OPTIONS.filter(opt => {
+      if (opt.id === "name" || opt.id === "count" || opt.id === "releaseDate" || opt.id === "dateAdded" || opt.id === "duration") return true;
+      return enableDeprecatedApis;
+    });
+  }, [enableDeprecatedApis]);
 
   const activeColumnsCount = React.useMemo(() => {
     return columnOrder
@@ -164,19 +329,28 @@ export default function Workspace({
       if (groupBy === "genre") {
         setGroupBy("none");
       }
+      if (subGroupBy === "genre") {
+        setSubGroupBy("none");
+      }
     }
-  }, [enableDeprecatedApis, sortKey, groupBy, DEPRECATED_COLUMNS]);
+  }, [enableDeprecatedApis, sortKey, groupBy, subGroupBy, DEPRECATED_COLUMNS]);
 
   useEffect(() => {
-    if (groupBy === "none") return;
-    const groupedColumn = groupBy as ColId;
-    if (visibleCols.has(groupedColumn)) return;
+    if (groupBy === "none" && subGroupBy === "none") return;
     setVisibleCols(prev => {
       const next = new Set(prev);
-      next.add(groupedColumn);
-      return next;
+      let changed = false;
+      if (groupBy !== "none" && !next.has(groupBy as ColId)) {
+        next.add(groupBy as ColId);
+        changed = true;
+      }
+      if (subGroupBy !== "none" && !next.has(subGroupBy as ColId)) {
+        next.add(subGroupBy as ColId);
+        changed = true;
+      }
+      return changed ? next : prev;
     });
-  }, [groupBy, visibleCols]);
+  }, [groupBy, subGroupBy]);
 
   const activePlaylist = playlists.find(p => String(p.id) === String(selectedPlaylistId));
   const currentPlaylistKey = String(selectedPlaylistId);
@@ -212,12 +386,13 @@ export default function Workspace({
   const isYours = (selectedPlaylistId === "liked" || activePlaylist?.owner === "yours") && selectedPlaylistId !== "all_my" && selectedPlaylistId !== "all_followed" && selectedPlaylistId !== "all_songs";
   const isEditable = !!activePlaylist && activePlaylist.owner === "yours";
   const canSortPlaylist = !!activePlaylist && activePlaylist.owner === "yours";
-  const canReorderTracks = canSortPlaylist && sortKey === null && groupBy === "none";
-  const canReorderGroups = canSortPlaylist && groupBy !== "none";
+  const canReorderTracks = canSortPlaylist;
+  const canReorderGroups = canSortPlaylist && (groupBy !== "none" || subGroupBy !== "none");
   const currentTrackOrder = trackOrders[currentPlaylistKey] ?? [];
-  const orderedPlaylistTracks = canSortPlaylist && (sortKey === null || groupBy !== "none") && currentTrackOrder.length > 0
+  const orderedPlaylistTracks = canSortPlaylist && currentTrackOrder.length > 0
     ? applyTrackOrder(playlistTracks, currentTrackOrder)
     : playlistTracks;
+
 
   const trackIndices = React.useMemo(() => {
     const map = new Map<Track, number>();
@@ -227,130 +402,141 @@ export default function Workspace({
     return map;
   }, [orderedPlaylistTracks]);
 
-  const getGroupSortValue = (tracks: Track[], key: SortKey): number | string => {
-    if (!key || tracks.length === 0) return "";
+  const filtered = React.useMemo(() => {
+    return orderedPlaylistTracks.filter((t) => {
+      if (!t) return false;
+      const q = search.toLowerCase();
+      const title = (t.title || "").toLowerCase();
+      const artist = (t.artist || "").toLowerCase();
+      const album = (t.album || "").toLowerCase();
+      const genre = (t.genre || "").toLowerCase();
+      return title.includes(q) || artist.includes(q) || album.includes(q) || genre.includes(q);
+    });
+  }, [orderedPlaylistTracks, search]);
 
-    const targetKey = key === "duration" ? "durationMs" : key;
-    const firstTrack = tracks[0];
-    const val = firstTrack[targetKey as keyof Track];
+  const flatSortedTracks = React.useMemo(() => {
+    if (!sortKey) return filtered;
+    return [...filtered].sort((a, b) => {
+      const cmpVal = compareTracks(a, b, sortKey, sortDir);
+      if (cmpVal !== 0) return cmpVal;
+      const idxA = trackIndices.get(a) ?? 0;
+      const idxB = trackIndices.get(b) ?? 0;
+      return idxA - idxB;
+    });
+  }, [filtered, sortKey, sortDir, trackIndices]);
 
-    if (typeof val === "number" && targetKey !== "releaseYear") {
-      // For numeric fields (except releaseYear), return the average value in the group
-      const sum = tracks.reduce((acc, t) => {
-        const v = t[targetKey as keyof Track];
-        return acc + (typeof v === "number" ? v : 0);
-      }, 0);
-      return sum / tracks.length;
+  interface GroupedData {
+    label: string;
+    key: string;
+    tracksCount: number;
+    subGroups: {
+      label: string;
+      key: string;
+      tracks: Track[];
+    }[];
+  }
+
+  const groupedData: GroupedData[] = React.useMemo(() => {
+    if (groupBy === "none") return [];
+
+    const getGroupValue = (t: Track, field: "artist" | "album" | "genre" | "releaseYear"): string => {
+      if (field === "artist") return t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist";
+      if (field === "album") return t.album || "Unknown Album";
+      if (field === "genre") return t.genre || "Unknown Genre";
+      if (field === "releaseYear") return String(t.releaseYear || "Unknown Year");
+      return "";
+    };
+
+    // 1. Group by parent group
+    const parentMap = new Map<string, Track[]>();
+    for (const t of filtered) {
+      const val = getGroupValue(t, groupBy);
+      if (!parentMap.has(val)) parentMap.set(val, []);
+      parentMap.get(val)!.push(t);
     }
 
-    if (key === "releaseDate" || key === "releaseYear") {
-      const dates = tracks.map(t => t.releaseDate || String(t.releaseYear || "")).filter(Boolean);
-      if (dates.length === 0) return "";
-      return dates[0];
-    }
+    // 2. Sort parent groups
+    const parentEntries = Array.from(parentMap.entries());
+    parentEntries.sort((a, b) => {
+      return compareGroups(a[0], a[1], b[0], b[1], groupBy, groupBySortKey, groupByDir, trackIndices);
+    });
 
-    if (key === "dateAdded") {
-      const dates = tracks.map(t => t.dateAdded).filter(Boolean);
-      if (dates.length === 0) return "";
-      return dates[0];
-    }
+    // 3. For each parent group, group by subGroupBy (if active)
+    const result: GroupedData[] = [];
+    for (const [parentLabel, parentTracks] of parentEntries) {
+      const parentKey = `${groupBy}:${parentLabel}`;
 
-    return String(val || "");
-  };
+      let subGroupsList: GroupedData["subGroups"] = [];
 
-  const sortedPlaylistTracks = React.useMemo(() => {
-    let base = orderedPlaylistTracks.filter(Boolean);
-
-    if (groupBy !== "none") {
-      const map = new Map<string, Track[]>();
-      for (const t of base) {
-        const key = groupBy === "artist" ? (t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist") : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push(t);
-      }
-      const entries = Array.from(map.entries());
-
-      if (!canReorderGroups) {
-        if (subSortKey === null) {
-          entries.sort((a, b) => {
-            const labelA = a[0];
-            const labelB = b[0];
-            if (groupBy === "releaseYear") {
-              const numA = parseInt(labelA, 10) || 0;
-              const numB = parseInt(labelB, 10) || 0;
-              return numA - numB;
-            }
-            return labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
-          });
-        } else {
-          entries.sort((a, b) => {
-            const labelA = a[0];
-            const labelB = b[0];
-
-            // If sorting by the groupBy key itself, sort alphabetically
-            if (subSortKey === groupBy || (groupBy === "artist" && subSortKey === "artist")) {
-              if (groupBy === "releaseYear") {
-                const numA = parseInt(labelA, 10) || 0;
-                const numB = parseInt(labelB, 10) || 0;
-                return subSortDir === "asc" ? numA - numB : numB - numA;
-              }
-              return subSortDir === "asc"
-                ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
-                : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
-            }
-
-            const valA = getGroupSortValue(a[1], subSortKey);
-            const valB = getGroupSortValue(b[1], subSortKey);
-
-            const isNumA = typeof valA === "number" && !isNaN(valA);
-            const isNumB = typeof valB === "number" && !isNaN(valB);
-
-            if (isNumA && isNumB) {
-              return subSortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
-            }
-            if (isNumA) return -1;
-            if (isNumB) return 1;
-
-            const strA = String(valA);
-            const strB = String(valB);
-            const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
-            return subSortDir === "asc" ? cmp : -cmp;
-          });
+      if (subGroupBy !== "none" && subGroupBy !== groupBy) {
+        // Group by subGroupBy
+        const subMap = new Map<string, Track[]>();
+        for (const t of parentTracks) {
+          const val = getGroupValue(t, subGroupBy);
+          if (!subMap.has(val)) subMap.set(val, []);
+          subMap.get(val)!.push(t);
         }
-      }
 
-      // Sort the tracks within each group by subSortKey (primary) and sortKey (secondary)
-      for (const entry of entries) {
-        entry[1].sort((a, b) => {
-          if (subSortKey) {
-            const cmpVal = compareTracks(a, b, subSortKey, subSortDir);
-            if (cmpVal !== 0) return cmpVal;
-          }
+        const subEntries = Array.from(subMap.entries());
+        // Sort sub-groups
+        subEntries.sort((a, b) => {
+          return compareGroups(a[0], a[1], b[0], b[1], subGroupBy, subGroupBySortKey, subGroupByDir, trackIndices);
+        });
+
+        subGroupsList = subEntries.map(([subLabel, subTracks]) => {
+          const sortedSubTracks = [...subTracks];
           if (sortKey) {
+            sortedSubTracks.sort((a, b) => {
+              const cmpVal = compareTracks(a, b, sortKey, sortDir);
+              if (cmpVal !== 0) return cmpVal;
+              const idxA = trackIndices.get(a) ?? 0;
+              const idxB = trackIndices.get(b) ?? 0;
+              return idxA - idxB;
+            });
+          }
+          return {
+            label: subLabel,
+            key: `${parentKey}|${subGroupBy}:${subLabel}`,
+            tracks: sortedSubTracks
+          };
+        });
+      } else {
+        // No sub-grouping
+        const sortedParentTracks = [...parentTracks];
+        if (sortKey) {
+          sortedParentTracks.sort((a, b) => {
             const cmpVal = compareTracks(a, b, sortKey, sortDir);
             if (cmpVal !== 0) return cmpVal;
-          }
-          const idxA = trackIndices.get(a) ?? 0;
-          const idxB = trackIndices.get(b) ?? 0;
-          return idxA - idxB;
-        });
+            const idxA = trackIndices.get(a) ?? 0;
+            const idxB = trackIndices.get(b) ?? 0;
+            return idxA - idxB;
+          });
+        }
+        subGroupsList = [{
+          label: "",
+          key: `${parentKey}|sub:none`,
+          tracks: sortedParentTracks
+        }];
       }
 
-      return entries.flatMap(([_, tracks]) => tracks);
-    } else {
-      if (sortKey) {
-        base.sort((a, b) => {
-          const cmpVal = compareTracks(a, b, sortKey, sortDir);
-          if (cmpVal !== 0) return cmpVal;
-          const idxA = trackIndices.get(a) ?? 0;
-          const idxB = trackIndices.get(b) ?? 0;
-          return idxA - idxB;
-        });
-      }
+      result.push({
+        label: parentLabel,
+        key: parentKey,
+        tracksCount: parentTracks.length,
+        subGroups: subGroupsList
+      });
     }
 
-    return base;
-  }, [playlistTracks, orderedPlaylistTracks, sortKey, sortDir, subSortKey, subSortDir, groupBy, trackIndices, canReorderGroups]);
+    return result;
+  }, [filtered, groupBy, groupByDir, groupBySortKey, subGroupBy, subGroupByDir, subGroupBySortKey, sortKey, sortDir, trackIndices]);
+
+  const playSequence = React.useMemo(() => {
+    if (groupBy === "none") return flatSortedTracks;
+    return groupedData.flatMap(g => g.subGroups.flatMap(sg => sg.tracks));
+  }, [flatSortedTracks, groupedData, groupBy]);
+
+  const sorted = playSequence;
+  const sortedPlaylistTracks = playSequence;
 
   const targetTrackOrder = sortedPlaylistTracks.map(getTrackOrderKey);
   const initialTrackOrder = playlistTracks.map(getTrackOrderKey);
@@ -386,8 +572,12 @@ export default function Workspace({
   }, [sortKey, sortDir]);
 
   useEffect(() => {
-    PreferenceUpdaters.setWorkspaceGroupBy(groupBy);
-  }, [groupBy]);
+    PreferenceUpdaters.setWorkspaceGroupBy(groupBy, groupByDir, groupBySortKey);
+  }, [groupBy, groupByDir, groupBySortKey]);
+
+  useEffect(() => {
+    PreferenceUpdaters.setWorkspaceSubGroupBy(subGroupBy, subGroupByDir, subGroupBySortKey);
+  }, [subGroupBy, subGroupByDir, subGroupBySortKey]);
 
   useEffect(() => {
     PreferenceUpdaters.setWorkspaceColumns(columnOrder, Array.from(visibleCols));
@@ -408,20 +598,28 @@ export default function Workspace({
   }, [columnsOpen]);
 
   useEffect(() => {
-    if (!groupByOpen) {
-      setHoveredGroupBy(null);
-      return;
-    }
+    if (!groupByOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest("[data-groupby-dropdown]")) {
         setGroupByOpen(false);
-        setHoveredGroupBy(null);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [groupByOpen]);
+
+  useEffect(() => {
+    if (!subGroupByOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-subgroupby-dropdown]")) {
+        setSubGroupByOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [subGroupByOpen]);
 
   useEffect(() => {
     if (!playlistFlyoutOpen) return;
@@ -460,33 +658,6 @@ export default function Workspace({
     dragColRef.current = null;
     dragOverColRef.current = null;
   };
-
-  const filtered = React.useMemo(() => {
-    return orderedPlaylistTracks.filter((t) => {
-      if (!t) return false;
-      const q = search.toLowerCase();
-      const title = (t.title || "").toLowerCase();
-      const artist = (t.artist || "").toLowerCase();
-      const album = (t.album || "").toLowerCase();
-      const genre = (t.genre || "").toLowerCase();
-      return title.includes(q) || artist.includes(q) || album.includes(q) || genre.includes(q);
-    });
-  }, [orderedPlaylistTracks, search]);
-
-  const sorted = React.useMemo(() => {
-    if (groupBy !== "none") {
-      return filtered;
-    } else {
-      if (!sortKey) return filtered;
-      return [...filtered].sort((a, b) => {
-        const cmpVal = compareTracks(a, b, sortKey, sortDir);
-        if (cmpVal !== 0) return cmpVal;
-        const idxA = trackIndices.get(a) ?? 0;
-        const idxB = trackIndices.get(b) ?? 0;
-        return idxA - idxB;
-      });
-    }
-  }, [filtered, sortKey, sortDir, groupBy, trackIndices]);
 
   const toggleSort = (key: SortKey) => {
     if (!key) return;
@@ -600,90 +771,7 @@ export default function Workspace({
     });
   };
 
-  const groupedEntries: { label: string; tracks: Track[] }[] = (() => {
-    if (groupBy === "none") return [{ label: "", tracks: sorted }];
-    const map = new Map<string, Track[]>();
-    for (const t of filtered) {
-      if (!t) continue;
-      const key = groupBy === "artist" ? (t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist") : groupBy === "album" ? t.album : groupBy === "genre" ? t.genre : String(t.releaseYear);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(t);
-    }
-    const entries = Array.from(map.entries()).map(([label, tracks]) => ({ label, tracks }));
 
-    if (!canReorderGroups) {
-      if (subSortKey === null) {
-        entries.sort((a, b) => {
-          const labelA = a.label;
-          const labelB = b.label;
-          if (groupBy === "releaseYear") {
-            const numA = parseInt(labelA, 10) || 0;
-            const numB = parseInt(labelB, 10) || 0;
-            return numA - numB;
-          }
-          return labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true });
-        });
-      } else {
-        entries.sort((a, b) => {
-          const labelA = a.label;
-          const labelB = b.label;
-
-          // If sorting by the groupBy key itself, sort alphabetically
-          if (subSortKey === groupBy || (groupBy === "artist" && subSortKey === "artist")) {
-            if (groupBy === "releaseYear") {
-              const numA = parseInt(labelA, 10) || 0;
-              const numB = parseInt(labelB, 10) || 0;
-              return subSortDir === "asc" ? numA - numB : numB - numA;
-            }
-            return subSortDir === "asc"
-              ? labelA.localeCompare(labelB, undefined, { sensitivity: "base", numeric: true })
-              : labelB.localeCompare(labelA, undefined, { sensitivity: "base", numeric: true });
-          }
-
-          const valA = getGroupSortValue(a.tracks, subSortKey);
-          const valB = getGroupSortValue(b.tracks, subSortKey);
-
-          const isNumA = typeof valA === "number" && !isNaN(valA);
-          const isNumB = typeof valB === "number" && !isNaN(valB);
-
-          if (isNumA && isNumB) {
-            return subSortDir === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
-          }
-          if (isNumA) return -1;
-          if (isNumB) return 1;
-
-          const strA = String(valA);
-          const strB = String(valB);
-          const cmp = strA.localeCompare(strB, undefined, { sensitivity: "base", numeric: true });
-          return subSortDir === "asc" ? cmp : -cmp;
-        });
-      }
-    }
-
-    // Sort the tracks within each group by subSortKey (primary) and sortKey (secondary)
-    for (const entry of entries) {
-      entry.tracks.sort((a, b) => {
-        if (subSortKey) {
-          const cmpVal = compareTracks(a, b, subSortKey, subSortDir);
-          if (cmpVal !== 0) return cmpVal;
-        }
-        if (sortKey) {
-          const cmpVal = compareTracks(a, b, sortKey, sortDir);
-          if (cmpVal !== 0) return cmpVal;
-        }
-        const idxA = trackIndices.get(a) ?? 0;
-        const idxB = trackIndices.get(b) ?? 0;
-        return idxA - idxB;
-      });
-    }
-
-    return entries;
-  })();
-
-  const playSequence = React.useMemo(() => {
-    if (groupBy === "none") return sorted;
-    return groupedEntries.flatMap(g => g.tracks);
-  }, [sorted, groupedEntries, groupBy]);
 
   const handleAddToPlaylist = async (destPlaylistId: string | number) => {
     const selectedIds = Array.from(selected);
@@ -789,77 +877,144 @@ export default function Workspace({
         ...prev,
         [currentPlaylistKey]: nextOrder,
       }));
+      setSortKey(null); // Override active flat sort with custom order
     }
 
     trackDragItemRef.current = null;
     trackDragOverRef.current = null;
   };
 
-  const handleGroupDragStart = (label: string) => {
+  const handleGroupDragStart = (_e: React.DragEvent, groupKey: string) => {
     if (!canReorderGroups) return;
-    groupDragItemRef.current = label;
+    groupDragItemRef.current = groupKey;
   };
 
-  const handleGroupDragEnter = (label: string) => {
+  const handleGroupDragEnter = (groupKey: string) => {
     if (!canReorderGroups) return;
-    groupDragOverRef.current = label;
+    groupDragOverRef.current = groupKey;
   };
 
   const handleGroupDragEnd = () => {
-    const draggedLabel = groupDragItemRef.current;
-    const targetLabel = groupDragOverRef.current;
+    const draggedKey = groupDragItemRef.current;
+    const targetKey = groupDragOverRef.current;
 
-    if (!draggedLabel || !targetLabel || draggedLabel === targetLabel) {
+    if (!draggedKey || !targetKey || draggedKey === targetKey) {
       groupDragItemRef.current = null;
       groupDragOverRef.current = null;
       return;
     }
 
-    const draggedGroup = groupedEntries.find(g => g.label === draggedLabel);
-    const targetGroup = groupedEntries.find(g => g.label === targetLabel);
+    const trackBelongsToGroup = (track: Track, keyStr: string) => {
+      const parts = keyStr.split("|");
+      return parts.every(part => {
+        const [field, val] = part.split(":");
+        const getGroupValue = (t: Track, f: string): string => {
+          if (f === "artist") return t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist";
+          if (f === "album") return t.album || "Unknown Album";
+          if (f === "genre") return t.genre || "Unknown Genre";
+          if (f === "releaseYear") return String(t.releaseYear || "Unknown Year");
+          return "";
+        };
+        return getGroupValue(track, field) === val;
+      });
+    };
 
-    if (!draggedGroup || !targetGroup) {
-      groupDragItemRef.current = null;
-      groupDragOverRef.current = null;
-      return;
-    }
+    const draggedTracks = playlistTracks.filter(t => trackBelongsToGroup(t, draggedKey));
+    const draggedTrackKeys = draggedTracks.map(getTrackOrderKey);
 
-    const currentOrder = orderedPlaylistTracks.map(getTrackOrderKey);
-    const draggedTrackKeys = draggedGroup.tracks.map(getTrackOrderKey);
-    const targetTrackKeys = targetGroup.tracks.map(getTrackOrderKey);
+    const targetTracks = playlistTracks.filter(t => trackBelongsToGroup(t, targetKey));
+    const targetTrackKeys = targetTracks.map(getTrackOrderKey);
 
-    const targetFirstTrackKey = targetTrackKeys[0];
-    const targetIndex = currentOrder.indexOf(targetFirstTrackKey);
+    if (draggedTrackKeys.length > 0 && targetTrackKeys.length > 0) {
+      const nextOrder = orderedPlaylistTracks.map(getTrackOrderKey);
+      const filteredOrder = nextOrder.filter(k => !draggedTrackKeys.includes(k));
+      const targetIndex = filteredOrder.indexOf(targetTrackKeys[0]);
 
-    if (targetIndex !== -1) {
-      const filteredOrder = currentOrder.filter(k => !draggedTrackKeys.includes(k));
-      const newTargetIndex = filteredOrder.indexOf(targetFirstTrackKey);
-      filteredOrder.splice(newTargetIndex, 0, ...draggedTrackKeys);
-
-      setTrackOrders(prev => ({
-        ...prev,
-        [currentPlaylistKey]: filteredOrder,
-      }));
+      if (targetIndex !== -1) {
+        filteredOrder.splice(targetIndex, 0, ...draggedTrackKeys);
+        setTrackOrders(prev => ({
+          ...prev,
+          [currentPlaylistKey]: filteredOrder,
+        }));
+        setSortKey(null); // Override active flat sort with custom order
+        if (draggedKey.includes("|")) {
+          setSubGroupBySortKey("custom");
+        } else {
+          setGroupBySortKey("custom");
+        }
+      }
     }
 
     groupDragItemRef.current = null;
     groupDragOverRef.current = null;
   };
 
-  const ColHeader = ({ col, label }: { col: ColId; label: string }) => (
-    <th className="p-0 select-none text-[10px] font-semibold uppercase tracking-widest text-[#B3B3B3]">
-      <button
-        type="button"
-        onClick={() => toggleSort(col as SortKey)}
-        className={`group w-full h-full px-3 py-3 flex items-center gap-1 text-left cursor-pointer transition-colors ${col === "dateAdded" ? "min-w-[160px]" : col === "releaseDate" ? "min-w-[130px]" : ""} ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}
+
+
+  const ColHeader = ({ col, label }: { col: ColId; label: string }) => {
+    const centered = isColCentered(col);
+    return (
+      <th
+        draggable
+        onDragStart={() => handleColDragStart(col)}
+        onDragEnter={() => handleColDragEnter(col)}
+        onDragEnd={handleColDragEnd}
+        onDragOver={(e) => e.preventDefault()}
+        className={`p-0 select-none text-[10px] font-semibold uppercase tracking-widest text-[#B3B3B3] cursor-move ${colMinWidths[col] || ""} ${centered ? "text-center" : "text-left"}`}
       >
-        {col === "energy" ? "Energy" : col === "bpm" ? "BPM" : label}
-        {sortKey === col
-          ? sortDir === "asc" ? <ChevronDown size={11} className="text-[#1DB954] rotate-180" /> : <ChevronDown size={11} className="text-[#1DB954]" />
-          : <ChevronDown size={11} className="opacity-0 group-hover:opacity-40 transition-opacity" />}
-      </button>
-    </th>
-  );
+        <button
+          type="button"
+          onClick={() => toggleSort(col as SortKey)}
+          className={`group w-full h-full px-3 py-3 flex items-center gap-1 cursor-pointer transition-colors ${colMinWidths[col] || ""} ${centered ? "justify-center" : "justify-start text-left"} ${sortKey === col ? "text-white" : "text-[#B3B3B3] hover:text-white"}`}
+        >
+          {col === "energy" ? "Energy" : col === "bpm" ? "BPM" : label}
+          {sortKey === col
+            ? sortDir === "asc" ? <ChevronDown size={11} className="text-[#1DB954] rotate-180 shrink-0" /> : <ChevronDown size={11} className="text-[#1DB954] shrink-0" />
+            : <ChevronDown size={11} className="opacity-0 group-hover:opacity-40 transition-opacity shrink-0" />}
+        </button>
+      </th>
+    );
+  };
+
+  const getGroupSortDirLabel = (sortKey: string, dir: SortDir, field: GroupBy) => {
+    if (sortKey === "name") {
+      if (field === "releaseYear") {
+        return dir === "asc" ? "Oldest" : "Newest";
+      }
+      return dir === "asc" ? "A-Z" : "Z-A";
+    }
+    if (sortKey === "count") {
+      return dir === "asc" ? "Least Tracks" : "Most Tracks";
+    }
+    if (sortKey === "popularity") {
+      return dir === "asc" ? "Least Popular" : "Most Popular";
+    }
+    if (sortKey === "releaseDate" || sortKey === "dateAdded") {
+      return dir === "asc" ? "Oldest" : "Newest";
+    }
+    if (sortKey === "duration") {
+      return dir === "asc" ? "Shortest" : "Longest";
+    }
+    if (sortKey === "bpm") {
+      return dir === "asc" ? "Slowest" : "Fastest";
+    }
+    return dir === "asc" ? "Lowest" : "Highest";
+  };
+
+  const getGroupHeaderLabel = (field: GroupBy, sortKey: string, dir: SortDir) => {
+    if (field === "none") return "None";
+    const fieldLabel = GROUP_BY_LABELS[field];
+    if (sortKey === "custom") {
+      const dirLabel = getGroupSortDirLabel(sortKey, dir, field);
+      return `${fieldLabel} (${dirLabel})`;
+    }
+    const sortKeyLabel = GROUP_SORT_OPTIONS.find(o => o.id === sortKey)?.label || sortKey;
+    const dirLabel = getGroupSortDirLabel(sortKey, dir, field);
+    if (sortKey === "name") {
+      return `${fieldLabel} (${dirLabel})`;
+    }
+    return `${fieldLabel} (by ${sortKeyLabel}: ${dirLabel})`;
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#121212] overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -1013,6 +1168,8 @@ export default function Workspace({
             />
           </div>
 
+
+
           <div className="flex items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md">
             <div className="relative" data-groupby-dropdown>
               <button
@@ -1028,128 +1185,216 @@ export default function Workspace({
                 <span>
                   Group By:{" "}
                   <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>
-                    {groupBy !== "none"
-                      ? `${GROUP_BY_LABELS[groupBy as GroupByOption]}${subSortKey ? ` (${ALL_COLUMNS.find((c) => c.id === subSortKey)?.label || subSortKey})` : ""}`
-                      : GROUP_BY_LABELS.none}
+                    {getGroupHeaderLabel(groupBy, groupBySortKey, groupByDir)}
                   </span>
                 </span>
                 <ChevronDown size={10} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
               </button>
               {groupByOpen && (
                 <div
-                  onMouseLeave={() => setHoveredGroupBy(null)}
-                  className="absolute top-full right-0 mt-1 w-44 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
+                  className="absolute top-full left-0 mt-1 w-56 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
                 >
+                  <div className="px-3 py-1.5 border-b border-[#383838] mb-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                      Primary Group By
+                    </p>
+                  </div>
                   <button
                     onClick={() => {
                       setGroupBy("none");
-                      setSortKey(null);
-                      setSubSortKey(null);
+                      setSubGroupBy("none");
                       setGroupByOpen(false);
                       setCollapsedGroups(new Set());
                     }}
-                    onMouseEnter={() => setHoveredGroupBy(null)}
-                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors rounded-t-lg cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                    className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
                   >
-                    <span>{GROUP_BY_LABELS.none}</span>
+                    <span>None (Flat List)</span>
                     {groupBy === "none" && <Check size={12} />}
                   </button>
                   {GROUPABLE_COLUMNS
                     .filter((column) => enableDeprecatedApis || column.id !== "genre")
-                    .map((column, index, arr) => {
+                    .map((column) => {
                       const option = column.id as GroupBy;
                       const isActive = groupBy === option;
-                      const isLast = index === arr.length - 1;
                       return (
-                        <div
+                        <button
                           key={option}
-                          className="relative"
-                          onMouseEnter={() => setHoveredGroupBy(option)}
+                          onClick={() => {
+                            setGroupBy(option);
+                            if (subGroupBy === option) {
+                              setSubGroupBy("none");
+                            }
+                            setGroupByOpen(false);
+                            setCollapsedGroups(new Set());
+                          }}
+                          className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${isActive ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
                         >
-                          <button
-                            onClick={() => {
-                              setGroupBy(option);
-                              setSortKey(null);
-                              setSubSortKey(null);
-                              setGroupByOpen(false);
-                              setCollapsedGroups(new Set());
-                            }}
-                            className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${isLast ? "rounded-b-lg" : ""} ${isActive ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
-                          >
-                            <span>{column.label}</span>
-                            <div className="flex items-center gap-1.5">
-                              {isActive && <Check size={12} className="text-[#1DB954]" />}
-                              <ChevronRight size={12} className="opacity-60" />
-                            </div>
-                          </button>
-                        </div>
+                          <span>{column.label}</span>
+                          {isActive && <Check size={12} className="text-[#1DB954]" />}
+                        </button>
                       );
                     })}
 
-                  {/* Floating Sub-menu */}
-                  {hoveredGroupBy && hoveredGroupBy !== "none" && (
-                    <div
-                      className="absolute top-0 left-full ml-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 max-h-[350px] overflow-y-auto"
-                      style={{ scrollbarWidth: "thin" }}
-                    >
-                      <div className="px-3 py-1.5 border-b border-[#383838] mb-1">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
-                          Sub-sort {GROUP_BY_LABELS[hoveredGroupBy]}
-                        </p>
+                  {groupBy !== "none" && (
+                    <>
+                      <div className="border-t border-[#383838] my-1" />
+                      <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                        Sort Groups By
                       </div>
-
-                      {/* Default (No Sub-sort) Option */}
+                      <div className="max-h-40 overflow-y-auto">
+                        {visibleGroupSortOptions.map(opt => (
+                          <button
+                            key={opt.id}
+                            onClick={() => {
+                              setGroupBySortKey(opt.id);
+                            }}
+                            className={`w-full text-left px-4 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${groupBySortKey === opt.id ? "text-[#1DB954] bg-[#1DB954]/10 font-bold" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                          >
+                            <span>{opt.label}</span>
+                            {groupBySortKey === opt.id && <Check size={12} />}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="border-t border-[#383838] my-1" />
+                      <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                        Sort Group Direction
+                      </div>
                       <button
                         onClick={() => {
-                          setGroupBy(hoveredGroupBy);
-                          setSubSortKey(null);
-                          setGroupByOpen(false);
-                          setCollapsedGroups(new Set());
+                          setGroupByDir("asc");
                         }}
-                        className={`w-full text-left px-3 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${groupBy === hoveredGroupBy && subSortKey === null ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                        className={`w-full text-left px-4 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${groupByDir === "asc" ? "text-[#1DB954] bg-[#1DB954]/10 font-bold" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
                       >
-                        <span className="truncate">Default</span>
-                        {groupBy === hoveredGroupBy && subSortKey === null && <Check size={12} />}
+                        <span>Ascending ({getGroupSortDirLabel(groupBySortKey, "asc", groupBy)})</span>
+                        {groupByDir === "asc" && <Check size={12} />}
                       </button>
-
-                      {/* Columns to sort by */}
-                      {ALL_COLUMNS
-                        .filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId))
-                        .map(col => {
-                          const isCurrentSort = groupBy === hoveredGroupBy && subSortKey === col.id;
-                          return (
-                            <button
-                              key={col.id}
-                              onClick={() => {
-                                setGroupBy(hoveredGroupBy);
-                                if (subSortKey === col.id) {
-                                  setSubSortDir(dir => dir === "asc" ? "desc" : "asc");
-                                } else {
-                                  setSubSortKey(col.id as SortKey);
-                                  setSubSortDir("asc");
-                                }
-                                setGroupByOpen(false);
-                                setCollapsedGroups(new Set());
-                              }}
-                              className={`w-full text-left px-3 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${isCurrentSort ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
-                            >
-                              <span className="truncate">{col.label}</span>
-                              <div className="flex items-center gap-1.5">
-                                {isCurrentSort && (
-                                  <>
-                                    <span className="font-mono text-[10px]">{subSortDir === "asc" ? "↑" : "↓"}</span>
-                                    <Check size={12} className="text-[#1DB954]" />
-                                  </>
-                                )}
-                              </div>
-                            </button>
-                          );
-                        })}
-                    </div>
+                      <button
+                        onClick={() => {
+                          setGroupByDir("desc");
+                        }}
+                        className={`w-full text-left px-4 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${groupByDir === "desc" ? "text-[#1DB954] bg-[#1DB954]/10 font-bold" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                      >
+                        <span>Descending ({getGroupSortDirLabel(groupBySortKey, "desc", groupBy)})</span>
+                        {groupByDir === "desc" && <Check size={12} />}
+                      </button>
+                    </>
                   )}
                 </div>
               )}
             </div>
+
+            {groupBy !== "none" && (
+              <>
+                <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />
+                <div className="relative" data-subgroupby-dropdown>
+                  <button
+                    onClick={() => setSubGroupByOpen(o => !o)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${subGroupByOpen
+                      ? "bg-[#333333] text-white"
+                      : subGroupBy !== "none"
+                        ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
+                        : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
+                      }`}
+                  >
+                    <ListMusic size={12} className={subGroupBy !== "none" ? "text-[#1DB954]" : ""} />
+                    <span>
+                      Sub-group:{" "}
+                      <span className={subGroupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>
+                        {getGroupHeaderLabel(subGroupBy, subGroupBySortKey, subGroupByDir)}
+                      </span>
+                    </span>
+                    <ChevronDown size={10} className={`transition-transform duration-200 ${subGroupByOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {subGroupByOpen && (
+                    <div
+                      className="absolute top-full left-0 mt-1 w-56 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
+                    >
+                      <div className="px-3 py-1.5 border-b border-[#383838] mb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                          Secondary Sub-group By
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSubGroupBy("none");
+                          setSubGroupByOpen(false);
+                          setCollapsedGroups(new Set());
+                        }}
+                        className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${subGroupBy === "none" ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                      >
+                        <span>None (No Sub-group)</span>
+                        {subGroupBy === "none" && <Check size={12} />}
+                      </button>
+                      {GROUPABLE_COLUMNS
+                        .filter((column) => (enableDeprecatedApis || column.id !== "genre") && column.id !== groupBy)
+                        .map((column) => {
+                          const option = column.id as GroupBy;
+                          const isActive = subGroupBy === option;
+                          return (
+                            <button
+                              key={option}
+                              onClick={() => {
+                                setSubGroupBy(option);
+                                setSubGroupByOpen(false);
+                                setCollapsedGroups(new Set());
+                              }}
+                              className={`w-full text-left px-4 py-2 text-[13px] flex items-center justify-between transition-colors cursor-pointer ${isActive ? "text-[#1DB954] bg-[#1DB954]/10" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                            >
+                              <span>{column.label}</span>
+                              {isActive && <Check size={12} className="text-[#1DB954]" />}
+                            </button>
+                          );
+                        })}
+
+                      {subGroupBy !== "none" && (
+                        <>
+                          <div className="border-t border-[#383838] my-1" />
+                          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                            Sort Sub-groups By
+                          </div>
+                          <div className="max-h-40 overflow-y-auto">
+                            {visibleGroupSortOptions.map(opt => (
+                              <button
+                                key={opt.id}
+                                onClick={() => {
+                                  setSubGroupBySortKey(opt.id);
+                                }}
+                                className={`w-full text-left px-4 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${subGroupBySortKey === opt.id ? "text-[#1DB954] bg-[#1DB954]/10 font-bold" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                              >
+                                <span>{opt.label}</span>
+                                {subGroupBySortKey === opt.id && <Check size={12} />}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="border-t border-[#383838] my-1" />
+                          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                            Sort Sub-group Direction
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSubGroupByDir("asc");
+                            }}
+                            className={`w-full text-left px-4 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${subGroupByDir === "asc" ? "text-[#1DB954] bg-[#1DB954]/10 font-bold" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                          >
+                            <span>Ascending ({getGroupSortDirLabel(subGroupBySortKey, "asc", subGroupBy)})</span>
+                            {subGroupByDir === "asc" && <Check size={12} />}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSubGroupByDir("desc");
+                            }}
+                            className={`w-full text-left px-4 py-1.5 text-[12px] flex items-center justify-between transition-colors cursor-pointer ${subGroupByDir === "desc" ? "text-[#1DB954] bg-[#1DB954]/10 font-bold" : "text-[#B3B3B3] hover:text-white hover:bg-[#383838]"}`}
+                          >
+                            <span>Descending ({getGroupSortDirLabel(subGroupBySortKey, "desc", subGroupBy)})</span>
+                            {subGroupByDir === "desc" && <Check size={12} />}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
             <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />
 
@@ -1173,8 +1418,8 @@ export default function Workspace({
                   <div className="max-h-60 overflow-y-auto py-1">
                     {ALL_COLUMNS.filter(col => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(col.id as ColId)).map(col => (
                       <button key={col.id} onClick={() => toggleColVisibility(col.id as ColId)}
-                        disabled={groupBy !== "none" && groupBy === col.id}
-                        className={`w-full flex items-center justify-between px-4 py-2 text-[13px] transition-colors text-left ${groupBy !== "none" && groupBy === col.id ? "cursor-not-allowed bg-[#1DB954]/10" : "hover:bg-[#383838] cursor-pointer"}`}>
+                        disabled={(groupBy !== "none" && groupBy === col.id) || (subGroupBy !== "none" && subGroupBy === col.id)}
+                        className={`w-full flex items-center justify-between px-4 py-2 text-[13px] transition-colors text-left ${((groupBy !== "none" && groupBy === col.id) || (subGroupBy !== "none" && subGroupBy === col.id)) ? "cursor-not-allowed bg-[#1DB954]/10" : "hover:bg-[#383838] cursor-pointer"}`}>
                         <span className={visibleCols.has(col.id as ColId) ? "text-white" : "text-[#535353]"}>{col.label}</span>
                         {visibleCols.has(col.id as ColId) && <Check size={12} className="text-[#1DB954]" />}
                       </button>
@@ -1186,31 +1431,44 @@ export default function Workspace({
 
             {groupBy !== "none" && (
               <>
-                <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 animate-in fade-in duration-200" />
-                <button
-                  onClick={() => {
-                    const allCollapsed = collapsedGroups.size === groupedEntries.length;
-                    if (allCollapsed) {
-                      setCollapsedGroups(new Set());
-                    } else {
-                      setCollapsedGroups(new Set(groupedEntries.map(g => g.label)));
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all text-[#B3B3B3] hover:text-white hover:bg-white/5 whitespace-nowrap cursor-pointer animate-in fade-in duration-200"
-                  title={collapsedGroups.size === groupedEntries.length ? "Expand all sections" : "Collapse all sections"}
-                >
-                  {collapsedGroups.size === groupedEntries.length ? (
+                {(() => {
+                  const totalGroupKeys: string[] = [];
+                  groupedData.forEach(g => {
+                    totalGroupKeys.push(g.key);
+                    g.subGroups.forEach(sg => {
+                      if (sg.label) totalGroupKeys.push(sg.key);
+                    });
+                  });
+                  const allCollapsed = collapsedGroups.size >= totalGroupKeys.length && totalGroupKeys.length > 0;
+                  return (
                     <>
-                      <ChevronsUpDown size={12} />
-                      <span>Expand All</span>
+                      <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 animate-in fade-in duration-200" />
+                      <button
+                        onClick={() => {
+                          if (allCollapsed) {
+                            setCollapsedGroups(new Set());
+                          } else {
+                            setCollapsedGroups(new Set(totalGroupKeys));
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all text-[#B3B3B3] hover:text-white hover:bg-white/5 whitespace-nowrap cursor-pointer animate-in fade-in duration-200"
+                        title={allCollapsed ? "Expand all sections" : "Collapse all sections"}
+                      >
+                        {allCollapsed ? (
+                          <>
+                            <ChevronsUpDown size={12} />
+                            <span>Expand All</span>
+                          </>
+                        ) : (
+                          <>
+                            <ChevronsDownUp size={12} />
+                            <span>Collapse All</span>
+                          </>
+                        )}
+                      </button>
                     </>
-                  ) : (
-                    <>
-                      <ChevronsDownUp size={12} />
-                      <span>Collapse All</span>
-                    </>
-                  )}
-                </button>
+                  );
+                })()}
               </>
             )}
           </div>
@@ -1323,6 +1581,7 @@ export default function Workspace({
         )}
 
         <div ref={tableScrollRef} className={`h-full overflow-auto ${(loadingTracks && playlistTracks.length === 0) ? "opacity-0 pointer-events-none" : ""}`}>
+
           <table className="w-full min-w-[860px] border-collapse">
             <thead className="sticky top-0 z-10 bg-[#121212]">
               <tr className="border-b border-[#282828]">
@@ -1332,7 +1591,7 @@ export default function Workspace({
                     {selected.size === sorted.length && sorted.length > 0 && <Check size={10} className="text-black" />}
                   </button>
                 </th>
-                <th className="w-8 px-2 py-3 text-left text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">#</th>
+                <th className="w-8 px-2 py-3 text-center text-[10px] uppercase tracking-widest text-[#B3B3B3] font-semibold">#</th>
                 {columnOrder
                   .filter(id => visibleCols.has(id))
                   .filter(id => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(id))
@@ -1350,356 +1609,447 @@ export default function Workspace({
                   </td>
                 </tr>
               ) : (() => {
-                // Lazy rendering: accumulate rows until we hit visibleRowCount
-                let renderedCount = 0;
-                const rows = groupedEntries.map(({ label, tracks }, gi) => {
-                  const isCollapsed = collapsedGroups.has(label);
+                const renderTrackRow = (track: Track, globalIdx: number, isNested?: boolean) => {
+                  const isSelected = selected.has(track.id);
+                  const trackKey = getTrackOrderKey(track);
+                  const trackImage = track.cover;
+                  const isPlayingTrack = currentPlaybackTrackId === String(track.id);
+
                   return (
-                    <React.Fragment key={`group-${gi}-${label}`}>
-                      {groupBy !== "none" && (
-                        <tr
-                          draggable={canReorderGroups}
-                          onDragStart={() => handleGroupDragStart(label)}
-                          onDragEnter={() => handleGroupDragEnter(label)}
-                          onDragEnd={handleGroupDragEnd}
-                          onDragOver={(e) => e.preventDefault()}
-                          className={`bg-[#181818]/60 cursor-pointer hover:bg-[#1e1e1e] select-none transition-colors border-b border-[#282828]/20 ${canReorderGroups ? "hover:border-[#1DB954]/20" : ""
+                    <tr
+                      key={trackKey}
+                      draggable={canReorderTracks}
+                      onMouseDown={(e) => {
+                        if (e.shiftKey) e.preventDefault();
+                      }}
+                      onDragStart={() => handleTrackDragStart(trackKey)}
+                      onDragEnter={() => handleTrackDragEnter(trackKey)}
+                      onDragEnd={handleTrackDragEnd}
+                      onDragOver={(e) => e.preventDefault()}
+                      className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer select-none ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : globalIdx % 2 === 0 ? "" : "bg-[#181818]/40"
+                        }`}
+                      onClick={(e) => handleRowClick(e, track.id)}
+                    >
+                      <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRowClick(e, track.id); }}
+                          className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
                             }`}
-                          onClick={() => toggleGroup(label)}
                         >
-                          <td colSpan={totalColSpan} className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              {canReorderGroups && (
-                                <div
-                                  className="p-1 hover:bg-[#282828] rounded cursor-grab active:cursor-grabbing text-[#535353] hover:text-white transition-colors mr-0.5"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <GripVertical size={13} />
-                                </div>
-                              )}
-                              {isCollapsed
-                                ? <ChevronRight size={14} className="text-[#B3B3B3]" />
-                                : <ChevronDown size={14} className="text-[#B3B3B3]" />}
-                              <span className="text-[#B3B3B3] text-[12px] font-semibold">
-                                {GROUP_BY_LABELS[groupBy as GroupByOption]}: <span className="text-white">{label}</span>
-                                <span className="ml-2 text-[#535353]">({tracks.length} tracks)</span>
-                              </span>
-                            </div>
+                          {isSelected && <Check size={10} className="text-black" />}
+                        </button>
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
+                        <span className={`text-[12px] font-mono group-hover:hidden ${isPlayingTrack ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>
+                          {isPlayingTrack ? (
+                            <Volume2 size={12} className="text-[#1DB954] mx-auto" />
+                          ) : (
+                            globalIdx + 1
+                          )}
+                        </span>
+                        <Play
+                          size={12}
+                          className="text-white fill-white hidden group-hover:block cursor-pointer mx-auto"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playTrackSequence(playSequence, playSequence.findIndex(sortedTrack => String(sortedTrack.id) === String(track.id))).catch(() =>
+                              toast.error("Could not play track. Is Spotify open on an active device?")
+                            );
+                          }}
+                        />
+                      </td>
+                      {columnOrder
+                        .filter((colId) => visibleCols.has(colId))
+                        .filter((colId) => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(colId))
+                        .map((colId) => {
+                          const cell = (() => {
+                            if (colId === "title") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className={`flex items-center gap-3 ${isNested ? "pl-6" : ""}`}>
+                                    <div className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
+                                      {trackImage ? (
+                                        <ImageWithFallback src={trackImage} alt="" className="w-full h-full object-cover" />
+                                      ) : (
+                                        <Music2 size={14} className="text-[#B3B3B3]" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex flex-col">
+                                      <TextCarousel text={track.title} className="text-white text-[13px] font-semibold max-w-[180px]" />
+                                      <TextCarousel text={(track.artist || "").split(", ")[0]} className="text-[#B3B3B3] text-[11px] max-w-[180px]" />
+                                    </div>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "trackNumber") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                  {track.trackNumber !== undefined ? track.trackNumber : <span className="text-[#535353]">-</span>}
+                                </td>
+                              );
+                            }
+                            if (colId === "artist") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <TextCarousel text={track.artist} className="text-[#B3B3B3] text-[13px] max-w-[140px]" />
+                                </td>
+                              );
+                            }
+                            if (colId === "album") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <TextCarousel text={track.album} className="text-[#B3B3B3] text-[13px] max-w-[140px]" />
+                                </td>
+                              );
+                            }
+                            if (colId === "genre") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <TextCarousel text={track.genre} className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full max-w-[140px]" />
+                                </td>
+                              );
+                            }
+                            if (colId === "releaseYear") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex justify-center">
+                                    <TextCarousel text={String(track.releaseYear)} className="text-[#B3B3B3] text-[12px] font-mono max-w-[90px]" />
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "releaseDate") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex justify-center">
+                                    <TextCarousel text={formatDate(track.releaseDate || String(track.releaseYear))} className="text-[#B3B3B3] text-[12px] font-mono max-w-[120px]" />
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "dateAdded") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5 min-w-[160px]">
+                                  <div className="flex justify-center">
+                                    <TextCarousel text={formatDate(track.dateAdded)} className="text-[#B3B3B3] text-[12px] font-mono max-w-[160px]" />
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "bpm") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                  {track.bpm !== undefined ? track.bpm : <span className="text-[#535353]">-</span>}
+                                </td>
+                              );
+                            }
+                            if (colId === "popularity") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-[#1DB954] h-full" style={{ width: `${Math.min(100, Math.max(0, track.popularity))}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[12px] font-mono w-8 text-right shrink-0">
+                                      {Math.round(track.popularity)}
+                                    </span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "energy") {
+                              if (track.energy === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const energyPct = Math.round(track.energy * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-[#1DB954] h-full" style={{ width: `${energyPct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{energyPct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "danceability") {
+                              if (track.danceability === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = Math.round(track.danceability * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-purple-500 h-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{pct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "valence") {
+                              if (track.valence === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = Math.round(track.valence * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-amber-500 h-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{pct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "acousticness") {
+                              if (track.acousticness === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = Math.round(track.acousticness * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-cyan-500 h-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{pct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "instrumentalness") {
+                              if (track.instrumentalness === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = Math.round(track.instrumentalness * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-pink-500 h-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{pct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "speechiness") {
+                              if (track.speechiness === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = Math.round(track.speechiness * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-indigo-500 h-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{pct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "liveness") {
+                              if (track.liveness === undefined) {
+                                return (
+                                  <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
+                                    -
+                                  </td>
+                                );
+                              }
+                              const pct = Math.round(track.liveness * 100);
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden shrink-0">
+                                      <div className="bg-emerald-500 h-full" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="text-[#B3B3B3] text-[11px] font-mono shrink-0">{pct}%</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "loudness") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                  {track.loudness !== undefined ? `${track.loudness.toFixed(1)} dB` : <span className="text-[#535353]">-</span>}
+                                </td>
+                              );
+                            }
+                            if (colId === "duration") {
+                              return (
+                                <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
+                                  {track.duration}
+                                </td>
+                              );
+                            }
+                            return null;
+                          })();
+                          if (cell && React.isValidElement(cell)) {
+                            const centered = isColCentered(colId);
+                            return React.cloneElement(cell as React.ReactElement<any>, {
+                              className: `${(cell as React.ReactElement<any>).props.className || ""} ${colMinWidths[colId] || ""} ${centered ? "text-center" : ""}`
+                            });
+                          }
+                          return cell;
+                        })}
+                    </tr>
+                  );
+                };
+
+                let renderedCount = 0;
+
+                if (groupBy === "none") {
+                  // Render flat list with lazy loading
+                  const visibleTracks = flatSortedTracks.slice(0, visibleRowCount);
+                  return (
+                    <>
+                      {visibleTracks.map((track, idx) => {
+                        return renderTrackRow(track, idx);
+                      })}
+                      {visibleRowCount < flatSortedTracks.length && (
+                        <tr ref={lazyTriggerRef}>
+                          <td colSpan={totalColSpan} className="py-4 text-center">
+                            <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent border-[#1DB954]" />
                           </td>
                         </tr>
                       )}
-                      {!isCollapsed && (() => {
+                    </>
+                  );
+                }
+
+                // Render grouped/subgrouped list
+                const rows: React.ReactNode[] = [];
+
+                groupedData.forEach((parentGroup) => {
+                  const isParentCollapsed = collapsedGroups.has(parentGroup.key);
+
+                  // Render parent group header
+                  rows.push(
+                    <tr
+                      key={parentGroup.key}
+                      draggable={canReorderGroups}
+                      onDragStart={(e) => handleGroupDragStart(e, parentGroup.key)}
+                      onDragEnter={() => handleGroupDragEnter(parentGroup.key)}
+                      onDragEnd={handleGroupDragEnd}
+                      onDragOver={(e) => e.preventDefault()}
+                      onClick={() => toggleGroup(parentGroup.key)}
+                      className={`bg-[#1a1a1a] select-none transition-colors border-b border-[#282828]/30 hover:bg-[#222]/80 ${canReorderGroups ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+                    >
+                      <td colSpan={totalColSpan} className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          {isParentCollapsed ? (
+                            <ChevronRight size={14} className="text-[#B3B3B3]" />
+                          ) : (
+                            <ChevronDown size={14} className="text-[#B3B3B3]" />
+                          )}
+                          <span className="text-[#B3B3B3] text-[12px] font-bold uppercase tracking-wide">
+                            {GROUP_BY_LABELS[groupBy]}: <span className="text-white normal-case font-semibold">{parentGroup.label}</span>
+                            <span className="ml-2 text-[#636363] font-normal">({parentGroup.tracksCount} tracks)</span>
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+
+                  if (!isParentCollapsed) {
+                    parentGroup.subGroups.forEach((subGroup) => {
+                      const isSubCollapsed = collapsedGroups.has(subGroup.key);
+                      const hasSubGroup = subGroupBy !== "none" && subGroupBy !== groupBy;
+
+                      if (hasSubGroup) {
+                        rows.push(
+                          <tr
+                            key={subGroup.key}
+                            draggable={canReorderGroups}
+                            onDragStart={(e) => handleGroupDragStart(e, subGroup.key)}
+                            onDragEnter={() => handleGroupDragEnter(subGroup.key)}
+                            onDragEnd={handleGroupDragEnd}
+                            onDragOver={(e) => e.preventDefault()}
+                            onClick={() => toggleGroup(subGroup.key)}
+                            className={`bg-[#151515] select-none transition-colors border-b border-[#282828]/20 hover:bg-[#1a1a1a]/80 ${canReorderGroups ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+                          >
+                            <td colSpan={totalColSpan} className="px-10 py-2.5">
+                              <div className="flex items-center gap-2">
+                                {isSubCollapsed ? (
+                                  <ChevronRight size={12} className="text-[#888]" />
+                                ) : (
+                                  <ChevronDown size={12} className="text-[#888]" />
+                                )}
+                                <span className="text-[#A3A3A3] text-[11px] font-bold uppercase tracking-wide">
+                                  {GROUP_BY_LABELS[subGroupBy]}: <span className="text-white normal-case font-semibold">{subGroup.label || "None"}</span>
+                                  <span className="ml-2 text-[#535353] font-normal">({subGroup.tracks.length} tracks)</span>
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      if (!hasSubGroup || !isSubCollapsed) {
+                        // Render tracks in this sub-group (respecting lazy loading limit)
                         const limit = Math.max(0, visibleRowCount - renderedCount);
-                        const visibleTracks = tracks.slice(0, limit);
+                        const visibleTracks = subGroup.tracks.slice(0, limit);
                         const groupStartIdx = renderedCount;
                         renderedCount += visibleTracks.length;
-                        return visibleTracks.map((track, i) => {
-                          const globalIdx = groupStartIdx + i;
-                          const isSelected = selected.has(track.id);
-                          const trackKey = getTrackOrderKey(track);
-                          const trackImage = track.cover;
-                          const isPlayingTrack = currentPlaybackTrackId === String(track.id);
-                          return (
-                            <tr
-                              key={trackKey}
-                              draggable={canReorderTracks}
-                              onMouseDown={(e) => {
-                                if (e.shiftKey) e.preventDefault();
-                              }}
-                              onDragStart={() => handleTrackDragStart(trackKey)}
-                              onDragEnter={() => handleTrackDragEnter(trackKey)}
-                              onDragEnd={handleTrackDragEnd}
-                              onDragOver={(e) => e.preventDefault()}
-                              className={`group border-b border-[#282828]/40 hover:bg-[#282828]/60 transition-colors cursor-pointer select-none ${isPlayingTrack ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : isSelected ? "bg-[#1DB954]/10 hover:bg-[#1DB954]/15" : globalIdx % 2 === 0 ? "" : "bg-[#181818]/40"
-                                }`}
-                              onClick={(e) => handleRowClick(e, track.id)}
-                            >
-                              <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleRowClick(e, track.id); }}
-                                  className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer ${isSelected ? "bg-[#1DB954] border-[#1DB954]" : "border-[#535353] hover:border-white"
-                                    }`}
-                                >
-                                  {isSelected && <Check size={10} className="text-black" />}
-                                </button>
-                              </td>
-                              <td className="px-2 py-2.5">
-                                <span className={`text-[12px] font-mono group-hover:hidden ${isPlayingTrack ? "text-[#1DB954] font-semibold" : "text-[#B3B3B3]"}`}>
-                                  {isPlayingTrack ? (
-                                    <Volume2 size={12} className="text-[#1DB954]" />
-                                  ) : (
-                                    globalIdx + 1
-                                  )}
-                                </span>
-                                <Play
-                                  size={12}
-                                  className="text-white fill-white hidden group-hover:block cursor-pointer"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    playTrackSequence(playSequence, playSequence.findIndex(sortedTrack => String(sortedTrack.id) === String(track.id))).catch(() =>
-                                      toast.error("Could not play track. Is Spotify open on an active device?")
-                                    );
-                                  }}
-                                />
-                              </td>
-                              {columnOrder
-                                .filter((colId) => visibleCols.has(colId))
-                                .filter((colId) => enableDeprecatedApis || !DEPRECATED_COLUMNS.has(colId))
-                                .map((colId) => {
-                                  if (colId === "title") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-3">
-                                          <div className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
-                                            {trackImage ? (
-                                              <ImageWithFallback src={trackImage} alt="" className="w-full h-full object-cover" />
-                                            ) : (
-                                              <Music2 size={14} className="text-[#B3B3B3]" />
-                                            )}
-                                          </div>
-                                          <div className="min-w-0 flex flex-col">
-                                            <TextCarousel text={track.title} className="text-white text-[13px] font-semibold max-w-[180px]" />
-                                            <TextCarousel text={(track.artist || "").split(", ")[0]} className="text-[#B3B3B3] text-[11px] max-w-[180px]" />
-                                          </div>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "artist") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <TextCarousel text={track.artist} className="text-[#B3B3B3] text-[13px] max-w-[140px]" />
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "album") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <TextCarousel text={track.album} className="text-[#B3B3B3] text-[13px] max-w-[140px]" />
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "genre") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <TextCarousel text={track.genre} className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full max-w-[140px]" />
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "releaseYear") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <TextCarousel text={String(track.releaseYear)} className="text-[#B3B3B3] text-[12px] font-mono max-w-[90px]" />
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "releaseDate") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <TextCarousel text={formatDate(track.releaseDate || String(track.releaseYear))} className="text-[#B3B3B3] text-[12px] font-mono max-w-[120px]" />
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "dateAdded") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5 min-w-[160px]">
-                                        <TextCarousel text={formatDate(track.dateAdded)} className="text-[#B3B3B3] text-[12px] font-mono max-w-[160px]" />
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "bpm") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                        {track.bpm !== undefined ? track.bpm : <span className="text-[#535353]">-</span>}
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "popularity") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-[#1DB954] h-full" style={{ width: `${Math.min(100, Math.max(0, track.popularity))}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[12px] font-mono w-8 text-right">
-                                            {Math.round(track.popularity)}
-                                          </span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "energy") {
-                                    if (track.energy === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const energyPct = Math.round(track.energy * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-[#1DB954] h-full" style={{ width: `${energyPct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{energyPct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "danceability") {
-                                    if (track.danceability === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const pct = Math.round(track.danceability * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-purple-500 h-full" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "valence") {
-                                    if (track.valence === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const pct = Math.round(track.valence * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-amber-500 h-full" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "acousticness") {
-                                    if (track.acousticness === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const pct = Math.round(track.acousticness * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-cyan-500 h-full" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "instrumentalness") {
-                                    if (track.instrumentalness === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const pct = Math.round(track.instrumentalness * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-pink-500 h-full" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "speechiness") {
-                                    if (track.speechiness === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const pct = Math.round(track.speechiness * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-indigo-500 h-full" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "liveness") {
-                                    if (track.liveness === undefined) {
-                                      return (
-                                        <td key={colId} className="px-3 py-2.5 text-[#535353] text-[12px] font-mono">
-                                          -
-                                        </td>
-                                      );
-                                    }
-                                    const pct = Math.round(track.liveness * 100);
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-16 bg-[#282828] h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-emerald-500 h-full" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-[#B3B3B3] text-[11px] font-mono">{pct}%</span>
-                                        </div>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "loudness") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                        {track.loudness !== undefined ? `${track.loudness.toFixed(1)} dB` : <span className="text-[#535353]">-</span>}
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === "duration") {
-                                    return (
-                                      <td key={colId} className="px-3 py-2.5 text-[#B3B3B3] text-[12px] font-mono">
-                                        {track.duration}
-                                      </td>
-                                    );
-                                  }
-                                  return null;
-                                })}
-                            </tr>
+
+                        visibleTracks.forEach((track, tIdx) => {
+                          const globalIdx = groupStartIdx + tIdx;
+                          rows.push(
+                            renderTrackRow(track, globalIdx, hasSubGroup)
                           );
                         });
-                      })()}
-                    </React.Fragment>
-                  );
+                      }
+                    });
+                  }
                 });
-                // Count total rendered rows to detect if sentinel is needed
-                let totalVisible = 0;
-                for (const { label, tracks } of groupedEntries) {
-                  if (!collapsedGroups.has(label)) totalVisible += tracks.length;
-                }
+
+                // Count total visible tracks to decide if sentinel is needed
+                let totalVisibleTracks = 0;
+                groupedData.forEach((pg) => {
+                  if (!collapsedGroups.has(pg.key)) {
+                    pg.subGroups.forEach((sg) => {
+                      const hasSub = subGroupBy !== "none" && subGroupBy !== groupBy;
+                      if (!hasSub || !collapsedGroups.has(sg.key)) {
+                        totalVisibleTracks += sg.tracks.length;
+                      }
+                    });
+                  }
+                });
+
                 return (
                   <>
                     {rows}
-                    {visibleRowCount < totalVisible && (
+                    {visibleRowCount < totalVisibleTracks && (
                       <tr ref={lazyTriggerRef}>
                         <td colSpan={totalColSpan} className="py-4 text-center">
                           <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent border-[#1DB954]" />

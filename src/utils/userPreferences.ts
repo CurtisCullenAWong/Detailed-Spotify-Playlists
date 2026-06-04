@@ -13,6 +13,11 @@ export interface UserPreferences {
   workspaceSortKey: string | null;
   workspaceSortDir: "asc" | "desc";
   workspaceGroupBy: "artist" | "album" | "genre" | "releaseYear" | "none";
+  workspaceGroupByDir: "asc" | "desc";
+  workspaceGroupBySortKey: string;
+  workspaceSubGroupBy: "artist" | "album" | "genre" | "releaseYear" | "none";
+  workspaceSubGroupByDir: "asc" | "desc";
+  workspaceSubGroupBySortKey: string;
   workspaceColumnOrder: string[];
   workspaceVisibleColumns: string[];
   workspaceSearch: string;
@@ -52,8 +57,13 @@ const defaultPreferences: UserPreferences = {
   workspaceSortKey: null,
   workspaceSortDir: "asc",
   workspaceGroupBy: "none",
-  workspaceColumnOrder: ["title", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
-  workspaceVisibleColumns: ["title", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
+  workspaceGroupByDir: "asc",
+  workspaceGroupBySortKey: "name",
+  workspaceSubGroupBy: "none",
+  workspaceSubGroupByDir: "asc",
+  workspaceSubGroupBySortKey: "name",
+  workspaceColumnOrder: ["title", "trackNumber", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
+  workspaceVisibleColumns: ["title", "trackNumber", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
   workspaceSearch: "",
   workspaceTrackOrders: {},
   
@@ -174,8 +184,11 @@ export const PreferenceUpdaters = {
   setWorkspaceSort: (key: string | null, dir: UserPreferences["workspaceSortDir"]) => 
     savePreferences({ workspaceSortKey: key, workspaceSortDir: dir }),
   
-  setWorkspaceGroupBy: (groupBy: UserPreferences["workspaceGroupBy"]) => 
-    updatePreference("workspaceGroupBy", groupBy),
+  setWorkspaceGroupBy: (groupBy: UserPreferences["workspaceGroupBy"], dir: UserPreferences["workspaceGroupByDir"], sortKey?: string) => 
+    savePreferences({ workspaceGroupBy: groupBy, workspaceGroupByDir: dir, workspaceGroupBySortKey: sortKey ?? "name" }),
+
+  setWorkspaceSubGroupBy: (subGroupBy: UserPreferences["workspaceSubGroupBy"], dir: UserPreferences["workspaceSubGroupByDir"], sortKey?: string) => 
+    savePreferences({ workspaceSubGroupBy: subGroupBy, workspaceSubGroupByDir: dir, workspaceSubGroupBySortKey: sortKey ?? "name" }),
   
   setWorkspaceColumns: (order: string[], visible: string[]) => 
     savePreferences({ workspaceColumnOrder: order, workspaceVisibleColumns: visible }),
