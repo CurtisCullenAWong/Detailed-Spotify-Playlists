@@ -519,7 +519,6 @@ export async function getRawPlaylistTracks(
     return uniqueItems.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
   } else {
     let totalAdded = 0;
-    const seen = new Set<string>();
     const items = await fetchAllPages<any>(
       `/playlists/${playlistId}/items?limit=50`,
       (i) => {
@@ -531,25 +530,17 @@ export async function getRawPlaylistTracks(
       onProgress,
       signal,
       onChunk ? async (chunk) => {
-        const uniqueItems = [];
+        const mappedChunk = [];
         for (const item of chunk) {
-          if (item?.id && !seen.has(item.id)) {
-            seen.add(item.id);
-            uniqueItems.push({ ...item, rowKey: `${String(playlistId)}:${totalAdded++}` });
+          if (item?.id) {
+            mappedChunk.push({ ...item, rowKey: `${String(playlistId)}:${totalAdded++}` });
           }
         }
-        if (uniqueItems.length > 0) await onChunk(uniqueItems);
+        if (mappedChunk.length > 0) await onChunk(mappedChunk);
       } : undefined
     );
-    const retSeen = new Set<string>();
-    const uniqueItems: any[] = [];
-    for (const item of items) {
-      if (item?.id && !retSeen.has(item.id)) {
-        retSeen.add(item.id);
-        uniqueItems.push(item);
-      }
-    }
-    return uniqueItems.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
+    const validItems = items.filter((item) => item?.id);
+    return validItems.map((item, index) => ({ ...item, rowKey: `${String(playlistId)}:${index}` }));
   }
 }
 
@@ -932,4 +923,23 @@ export async function unfollowPlaylist(playlistId: string | number): Promise<voi
   await spotifyFetch(`/playlists/${playlistId}/followers`, {
     method: "DELETE",
   });
+}
+
+// 13. Remove Playlist Tracks By Position
+export async function removePlaylistTracksByPosition(
+  playlistId: string | number,
+  tracksWithPositions: { uri: string; positions: number[] }[],
+  snapshotId?: string | null
+): Promise<string | null> {
+  const body: any = {
+    tracks: tracksWithPositions,
+  };
+  if (snapshotId) {
+    body.snapshot_id = snapshotId;
+  }
+  const response = await spotifyFetch(`/playlists/${playlistId}/tracks`, {
+    method: "DELETE",
+    body: JSON.stringify(body),
+  });
+  return response?.snapshot_id ?? null;
 }

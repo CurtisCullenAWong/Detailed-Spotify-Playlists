@@ -31,6 +31,7 @@ import {
   reorderPlaylistTracks,
   addTracksToPlaylist,
   removeTracksFromPlaylist,
+  removePlaylistTracksByPosition,
 } from "../../../utils/spotifyApi";
 import EditPlaylistModal from "../../components/EditPlaylistModal";
 import { TextCarousel } from "../../components/ui/TextCarousel";
@@ -257,6 +258,7 @@ export default function Workspace({
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [trackOrders, setTrackOrders] = useState<Record<string, string[]>>(preferences.workspaceTrackOrders);
   const [isSavingTrackOrder, setIsSavingTrackOrder] = useState(false);
+  const [isRemovingDuplicates, setIsRemovingDuplicates] = useState(false);
   // Lazy rendering: number of rows currently rendered
   const [visibleRowCount, setVisibleRowCount] = useState(LAZY_ROW_STEP);
   const lazyTriggerRef = useRef<HTMLTableRowElement>(null);
@@ -392,6 +394,21 @@ export default function Workspace({
   const orderedPlaylistTracks = canSortPlaylist && currentTrackOrder.length > 0
     ? applyTrackOrder(playlistTracks, currentTrackOrder)
     : playlistTracks;
+
+  const duplicateTrackIds = React.useMemo(() => {
+    const seen = new Set<string | number>();
+    const dups = new Set<string | number>();
+    for (const track of playlistTracks) {
+      if (seen.has(track.id)) {
+        dups.add(track.id);
+      } else {
+        seen.add(track.id);
+      }
+    }
+    return dups;
+  }, [playlistTracks]);
+
+  const hasDuplicates = duplicateTrackIds.size > 0;
 
 
   const trackIndices = React.useMemo(() => {
@@ -843,6 +860,112 @@ export default function Workspace({
     } catch (err) {
       console.error(err);
       toast.error("Failed to remove tracks. You can only remove tracks from playlists you own.");
+    }
+  };
+
+  const handleRemoveDuplicates = async () => {
+    if (!hasDuplicates || isRemovingDuplicates) return;
+
+    if (!confirm("Are you sure you want to remove all duplicate tracks from this playlist? This will keep the first occurrence of each song and delete the rest.")) {
+      return;
+    }
+
+    setIsRemovingDuplicates(true);
+    try {
+      const seenIds = new Set<string | number>();
+      const duplicatesToRemove: { uri: string; position: number }[] = [];
+
+      playlistTracks.forEach((track, index) => {
+        if (seenIds.has(track.id)) {
+          duplicatesToRemove.push({
+            uri: `spotify:track:${track.id}`,
+            position: index,
+          });
+        } else {
+          seenIds.add(track.id);
+        }
+      });
+
+      if (duplicatesToRemove.length === 0) {
+        toast.info("No duplicates found to remove.");
+        return;
+      }
+
+      // Sort duplicates to remove by position in descending order.
+      duplicatesToRemove.sort((a, b) => b.position - a.position);
+
+      let currentSnapshotId = await getPlaylistSnapshotId(selectedPlaylistId);
+      const batchSize = 100;
+
+      for (let i = 0; i < duplicatesToRemove.length; i += batchSize) {
+        const batch = duplicatesToRemove.slice(i, i + batchSize);
+        const uriToPositionsMap = new Map<string, number[]>();
+        for (const item of batch) {
+          if (!uriToPositionsMap.has(item.uri)) {
+            uriToPositionsMap.set(item.uri, []);
+          }
+          uriToPositionsMap.get(item.uri)!.push(item.position);
+        }
+
+        const tracksPayload = Array.from(uriToPositionsMap.entries()).map(([uri, positions]) => ({
+          uri,
+          positions,
+        }));
+
+        const newSnapshotId = await removePlaylistTracksByPosition(
+          selectedPlaylistId,
+          tracksPayload,
+          currentSnapshotId
+        );
+
+        if (newSnapshotId) {
+          currentSnapshotId = newSnapshotId;
+        }
+      }
+
+      // Update local state
+      const localSeen = new Set<string | number>();
+      const dedupedTracks = playlistTracks.filter(t => {
+        if (localSeen.has(t.id)) return false;
+        localSeen.add(t.id);
+        return true;
+      });
+
+      setPlaylistTracks(dedupedTracks);
+
+      setTrackOrders(prev => {
+        const nextOrder = prev[currentPlaylistKey] ?? [];
+        const updatedOrder = nextOrder.filter(key => {
+          return dedupedTracks.some(t => getTrackOrderKey(t) === key);
+        });
+        return {
+          ...prev,
+          [currentPlaylistKey]: updatedOrder,
+        };
+      });
+
+      setPlaylists(prevPlaylists =>
+        prevPlaylists.map(pl => {
+          if (String(pl.id) === String(selectedPlaylistId)) {
+            return {
+              ...pl,
+              tracks: dedupedTracks.length
+            };
+          }
+          return pl;
+        })
+      );
+
+      if (selectedPlaylistId === "liked") {
+        setLikedSongsCount(dedupedTracks.length);
+      }
+
+      toast.success(`Successfully removed ${duplicatesToRemove.length} duplicate track(s).`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to remove duplicate tracks. Make sure you own the playlist.");
+    } finally {
+      setIsRemovingDuplicates(false);
     }
   };
 
@@ -1488,6 +1611,31 @@ export default function Workspace({
                   >
                     <Trash2 size={12} />
                     <span>Remove</span>
+                  </button>
+                )}
+
+                {isYours && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveDuplicates}
+                    disabled={!hasDuplicates || isRemovingDuplicates || hasUnsavedTrackOrder}
+                    title={
+                      hasUnsavedTrackOrder
+                        ? "Please save your custom track order before removing duplicates"
+                        : !hasDuplicates
+                        ? "No duplicate tracks found in this playlist"
+                        : "Remove duplicate tracks, keeping the first occurrence of each"
+                    }
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap ${
+                      isRemovingDuplicates
+                        ? "bg-[#e91429] text-white cursor-wait"
+                        : hasDuplicates && !hasUnsavedTrackOrder
+                        ? "hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 cursor-pointer font-bold animate-pulse"
+                        : "text-[#535353] cursor-not-allowed"
+                    }`}
+                  >
+                    <Trash2 size={12} className={isRemovingDuplicates ? "animate-pulse" : ""} />
+                    <span>Remove Duplicates</span>
                   </button>
                 )}
 
