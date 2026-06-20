@@ -12,10 +12,10 @@ export interface UserPreferences {
   // Workspace preferences
   workspaceSortKey: string | null;
   workspaceSortDir: "asc" | "desc";
-  workspaceGroupBy: "artist" | "album" | "genre" | "releaseYear" | "none";
+  workspaceGroupBy: "artist" | "firstArtist" | "album" | "genre" | "firstGenre" | "releaseYear" | "none";
   workspaceGroupByDir: "asc" | "desc";
   workspaceGroupBySortKey: string;
-  workspaceSubGroupBy: "artist" | "album" | "genre" | "releaseYear" | "none";
+  workspaceSubGroupBy: "artist" | "firstArtist" | "album" | "genre" | "firstGenre" | "releaseYear" | "none";
   workspaceSubGroupByDir: "asc" | "desc";
   workspaceSubGroupBySortKey: string;
   workspaceColumnOrder: string[];
@@ -62,8 +62,8 @@ const defaultPreferences: UserPreferences = {
   workspaceSubGroupBy: "none",
   workspaceSubGroupByDir: "asc",
   workspaceSubGroupBySortKey: "name",
-  workspaceColumnOrder: ["title", "trackNumber", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
-  workspaceVisibleColumns: ["title", "trackNumber", "artist", "album", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
+  workspaceColumnOrder: ["title", "trackNumber", "firstArtist", "artist", "album", "firstGenre", "genre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
+  workspaceVisibleColumns: ["title", "trackNumber", "firstArtist", "album", "firstGenre", "releaseYear", "releaseDate", "dateAdded", "bpm", "energy", "popularity", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness", "duration"],
   workspaceSearch: "",
   workspaceTrackOrders: {},
   
@@ -77,7 +77,7 @@ const defaultPreferences: UserPreferences = {
   
   sidebarCollapsed: false,
   currentPage: "dashboard",
-
+ 
   // Feature flags — deprecated endpoints off by default for safety
   enableDeprecatedApis: false,
   selectedPlaylistId: null,
@@ -120,6 +120,17 @@ export function loadPreferences(): UserPreferences {
         } else {
           currentVisible.push(...missingVisible);
         }
+        
+        // Also remove original "artist" and "genre" to hide them by default during this migration
+        const artistIndex = currentVisible.indexOf("artist");
+        if (artistIndex !== -1) {
+          currentVisible.splice(artistIndex, 1);
+        }
+        const genreIndex = currentVisible.indexOf("genre");
+        if (genreIndex !== -1) {
+          currentVisible.splice(genreIndex, 1);
+        }
+
         merged.workspaceVisibleColumns = currentVisible;
         migrated = true;
       }

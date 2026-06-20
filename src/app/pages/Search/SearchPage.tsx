@@ -1,18 +1,26 @@
 import React, { useState } from "react";
-import { Search, X, Music2, Mic2, Play, MoreHorizontal, Menu } from "lucide-react";
+import { Search, X, Music2, Mic2, Play, MoreHorizontal, Menu, History, Compass, Layers, Clock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Artist, Track, Playlist } from "../../../data";
-import { SEARCH_FILTERS, BROWSE_CATEGORIES } from "../../../data";
+import { SEARCH_FILTERS } from "../../../data";
 import { searchSpotify, playTrack } from "../../../utils/spotifyApi";
 import { playTrackSequence, getPlaylistTrackCount } from "../../../utils/spotifyHelpers";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 
-const DEFAULT_TOP_ARTISTS: Artist[] = [
-  { name: "Daft Punk", cover: "bg-gradient-to-br from-yellow-500 to-amber-950", genre: "Electronic", plays: "1,240,000" },
-  { name: "The Weeknd", cover: "bg-gradient-to-br from-red-600 to-zinc-950", genre: "R&B", plays: "980,000" },
-  { name: "Billie Eilish", cover: "bg-gradient-to-br from-green-500 to-emerald-950", genre: "Pop", plays: "850,000" },
-  { name: "Hans Zimmer", cover: "bg-gradient-to-br from-blue-600 to-neutral-950", genre: "Soundtrack", plays: "720,000" },
-  { name: "Dua Lipa", cover: "bg-gradient-to-br from-pink-500 to-fuchsia-950", genre: "Dance-Pop", plays: "640,000" }
+interface EraCategory {
+  label: string;
+  query: string;
+  color: string;
+  yearDesc: string;
+}
+
+const ERA_CATEGORIES: EraCategory[] = [
+  { label: "New Releases", query: "tag:new", color: "from-emerald-500 to-teal-950", yearDesc: "Hot & Fresh" },
+  { label: "2020s Era", query: "year:2020-2026", color: "from-blue-600 to-indigo-950", yearDesc: "Modern Hits" },
+  { label: "2010s Hits", query: "year:2010-2019", color: "from-purple-600 to-fuchsia-950", yearDesc: "Streaming Era" },
+  { label: "Y2K Classics", query: "year:2000-2009", color: "from-pink-600 to-rose-950", yearDesc: "Pop & R&B" },
+  { label: "90s Anthems", query: "year:1990-1999", color: "from-amber-500 to-orange-950", yearDesc: "Alt & Hip-Hop" },
+  { label: "80s Synthwave", query: "year:1980-1989", color: "from-cyan-500 to-blue-900", yearDesc: "Retro Synths" },
 ];
 
 interface SearchPageProps {
@@ -26,6 +34,8 @@ interface SearchPageProps {
   onNavigateToAlbum: (id: string) => void;
   onNavigateToPlaylist: (id: string | number) => void;
   enableDeprecatedApis: boolean;
+  playlists?: Playlist[];
+  recentlyPlayed?: any[];
 }
 
 export default function SearchPage({
@@ -39,6 +49,8 @@ export default function SearchPage({
   onNavigateToAlbum,
   onNavigateToPlaylist,
   enableDeprecatedApis,
+  playlists = [],
+  recentlyPlayed = [],
 }: SearchPageProps) {
   const [activeFilter, setActiveFilter] = useState<"all" | "tracks" | "artists" | "playlists" | "albums">("all");
   const [loading, setLoading] = useState(false);
@@ -48,6 +60,15 @@ export default function SearchPage({
     playlists: Playlist[];
     albums: any[];
   }>({ tracks: [], artists: [], playlists: [], albums: [] });
+
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("spotify-search-history");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -66,6 +87,24 @@ export default function SearchPage({
       try {
         const searchResults = await searchSpotify(q);
         setResults(searchResults);
+        
+        const hasAnyResults =
+          (searchResults.tracks?.length || 0) > 0 ||
+          (searchResults.albums?.length || 0) > 0 ||
+          (searchResults.artists?.length || 0) > 0 ||
+          (searchResults.playlists?.length || 0) > 0;
+        if (hasAnyResults) {
+          setRecentSearches(prev => {
+            const filtered = prev.filter(item => item.toLowerCase() !== query.toLowerCase());
+            const next = [query, ...filtered].slice(0, 8);
+            try {
+              localStorage.setItem("spotify-search-history", JSON.stringify(next));
+            } catch (err) {
+              console.warn(err);
+            }
+            return next;
+          });
+        }
       } catch (err) {
         console.error("Search failed:", err);
       } finally {
@@ -74,7 +113,7 @@ export default function SearchPage({
     }, 400);
 
     return () => clearTimeout(timeout);
-  }, [q]);
+  }, [q, query]);
 
   const matchedTracks = results.tracks;
   const matchedArtists = results.artists;
@@ -88,6 +127,15 @@ export default function SearchPage({
     matchedAlbums.length > 0;
 
   const showBrowse = q === "";
+
+  const clearRecentSearches = () => {
+    setRecentSearches([]);
+    try {
+      localStorage.removeItem("spotify-search-history");
+    } catch (err) {
+      console.warn(err);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#121212]" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -148,60 +196,162 @@ export default function SearchPage({
           </div>
         )}
 
-        {/* Browse genres when empty */}
-        {showBrowse && (() => {
-          const hasUserTopArtists = topArtists && topArtists.length > 0;
-          const artistsToRender = hasUserTopArtists ? topArtists.slice(0, 5) : DEFAULT_TOP_ARTISTS;
-          
-          return (
-            <>
-              <h2 className="text-white text-[18px] font-bold mb-5">Browse Categories</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {BROWSE_CATEGORIES.map(cat => (
-                  <button key={cat.label} onClick={() => setQuery(cat.label)}
-                    className={`relative h-24 rounded-lg overflow-hidden ${cat.color} hover:brightness-110 transition-all text-left px-4 py-3 group cursor-pointer`}>
-                    <span className="text-white font-bold text-[16px] drop-shadow">{cat.label}</span>
-                    <Music2 size={48} className="absolute -bottom-2 -right-2 text-white/20 rotate-12 group-hover:text-white/30 transition-colors" />
+        {/* Browse & dashboard views when empty */}
+        {showBrowse && (
+          <div className="space-y-6 animate-fadeIn">
+            {/* Recent Searches Section */}
+            {recentSearches.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-1.5 text-[#B3B3B3]">
+                    <History size={14} />
+                    <h2 className="text-white text-[13px] font-bold tracking-tight">Recent Searches</h2>
+                  </div>
+                  <button
+                    onClick={clearRecentSearches}
+                    className="text-[#B3B3B3] hover:text-white text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Trash2 size={11} /> Clear all
                   </button>
-                ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {recentSearches.map(term => (
+                    <div
+                      key={term}
+                      onClick={() => setQuery(term)}
+                      className="group px-2.5 py-1 bg-[#282828] hover:bg-[#383838] border border-white/5 rounded-full text-[12px] text-white font-medium flex items-center gap-1.5 cursor-pointer hover:border-white/10 transition-all"
+                    >
+                      <span className="truncate max-w-[150px]">{term}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRecentSearches(prev => {
+                            const next = prev.filter(item => item !== term);
+                            try {
+                              localStorage.setItem("spotify-search-history", JSON.stringify(next));
+                            } catch (err) {
+                              console.warn(err);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="text-white/40 hover:text-white p-0.5 rounded-full hover:bg-white/10 flex items-center justify-center shrink-0 cursor-pointer"
+                        aria-label={`Remove search term ${term}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
+            )}
 
-              <h2 className="text-white text-[18px] font-bold mt-10 mb-5">
-                {hasUserTopArtists ? "Your Top Artists" : "Featured Artists"}
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {artistsToRender.map(artist => (
-                  <button key={artist.id || artist.name}
-                    onClick={() => {
-                      if (artist.id) {
-                        onNavigateToArtist(artist.id);
-                      } else {
-                        setQuery(artist.name);
-                      }
-                    }}
-                    className="group flex flex-col items-center gap-3 p-3 rounded-lg bg-[#181818] hover:bg-[#282828] transition-all text-center cursor-pointer">
-                    <div className="w-20 h-20 rounded-full flex items-center justify-center relative bg-[#282828] overflow-hidden shrink-0">
-                      {artist.cover && artist.cover.startsWith("http") ? (
-                        <img src={artist.cover} className="w-full h-full object-cover rounded-full" alt="" />
-                      ) : (
-                        <div className={`w-full h-full rounded-full ${artist.cover || "bg-[#282828]"} flex items-center justify-center`}>
-                          <Mic2 size={26} className="text-white/60" />
+            {/* Recently Played Section */}
+            {recentlyPlayed && recentlyPlayed.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 text-[#B3B3B3] mb-3">
+                  <Clock size={14} />
+                  <h2 className="text-white text-[13px] font-bold tracking-tight">Recently Played</h2>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                  {recentlyPlayed.slice(0, 8).map((track) => (
+                    <div
+                      key={track.id}
+                      onClick={() => onNavigateToTrack(track.id)}
+                      className="group flex flex-col p-1.5 rounded-md hover:bg-[#1f1f1f] transition-all cursor-pointer"
+                    >
+                      <div className="relative w-full aspect-square rounded bg-[#282828] shadow-sm mb-1.5 overflow-hidden">
+                        {track.cover && track.cover.startsWith("http") ? (
+                          <img src={track.cover} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" alt="" />
+                        ) : (
+                          <div className={`w-full h-full ${track.cover || "bg-[#282828]"} flex items-center justify-center`}>
+                            <Music2 size={16} className="text-white/20" />
+                          </div>
+                        )}
+                        <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              playTrack({ uris: [track.uri] })
+                                .catch(() => toast.error("Could not play track. Is Spotify open on an active device?"));
+                            }}
+                            className="p-1.5 bg-[#1DB954] hover:bg-[#1ed760] text-black rounded-full hover:scale-105 transition-all shadow-md cursor-pointer flex items-center justify-center"
+                          >
+                            <Play size={10} className="fill-black text-black" />
+                          </button>
                         </div>
-                      )}
-                      <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Play size={20} className="text-white fill-white ml-0.5" />
+                      </div>
+                      <div className="min-w-0 px-0.5">
+                        <h4 className="text-white text-[11px] font-semibold truncate group-hover:text-[#1DB954] transition-colors">{track.title}</h4>
+                        <span className="text-[#B3B3B3] text-[9px] block truncate mt-0.5">{track.artist}</span>
                       </div>
                     </div>
-                    <div>
-                      <p className="text-white text-[13px] font-semibold truncate max-w-[110px]">{artist.name}</p>
-                      <p className="text-[#B3B3B3] text-[11px] truncate max-w-[110px]">Artist</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Workspace Shortcuts */}
+            {playlists && playlists.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-1.5 text-[#B3B3B3]">
+                    <Layers size={14} />
+                    <h2 className="text-white text-[13px] font-bold tracking-tight">Workspace Playlists</h2>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                  {playlists.slice(0, 8).map(pl => (
+                    <div
+                      key={pl.id}
+                      onClick={() => onNavigateToPlaylist(pl.id)}
+                      className="group flex flex-col p-1.5 rounded-md hover:bg-[#1f1f1f] transition-all cursor-pointer"
+                    >
+                      <div className="relative w-full aspect-square rounded bg-[#282828] shadow-sm mb-1.5 overflow-hidden">
+                        {pl.cover && pl.cover.startsWith("http") ? (
+                          <img src={pl.cover} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" alt="" />
+                        ) : (
+                          <div className={`w-full h-full ${pl.cover || "bg-gradient-to-br from-slate-700 to-zinc-900"} group-hover:scale-105 transition-transform duration-200`} />
+                        )}
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <span className="bg-[#1DB954] text-black text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md transition-all flex items-center gap-0.5">
+                            <Layers size={8} /> Workspace
+                          </span>
+                        </div>
+                      </div>
+                      <div className="min-w-0 px-0.5">
+                        <h3 className="text-white text-[11px] font-semibold truncate group-hover:text-[#1DB954] transition-colors">{pl.name}</h3>
+                        <p className="text-[#B3B3B3] text-[9px] truncate mt-0.5">{getPlaylistTrackCount(pl)} tracks</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Era Explorer */}
+            <div>
+              <div className="flex items-center gap-1.5 text-[#B3B3B3] mb-3">
+                <Compass size={14} />
+                <h2 className="text-white text-[13px] font-bold tracking-tight">Browse by Era</h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                {ERA_CATEGORIES.map(era => (
+                  <button
+                    key={era.label}
+                    onClick={() => setQuery(era.query)}
+                    className={`relative h-14 rounded-lg overflow-hidden bg-gradient-to-br ${era.color} hover:brightness-110 border border-white/5 active:scale-98 transition-all text-left px-3 py-2.5 group cursor-pointer`}
+                  >
+                    <div className="flex flex-col justify-between h-full relative z-10">
+                      <span className="text-white font-bold text-[11px] leading-tight tracking-tight drop-shadow-sm">{era.label}</span>
+                      <span className="text-white/60 text-[8px] font-medium tracking-wide drop-shadow-sm uppercase">{era.yearDesc}</span>
                     </div>
                   </button>
                 ))}
               </div>
-            </>
-          );
-        })()}
+            </div>
+          </div>
+        )}
 
         {/* No results */}
         {!loading && q !== "" && !hasResults && (

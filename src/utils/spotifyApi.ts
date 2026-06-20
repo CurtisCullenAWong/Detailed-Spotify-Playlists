@@ -631,12 +631,13 @@ export async function getLikedSongsCount(): Promise<number> {
 
 // 5. Recently Played Tracks
 export async function getRecentlyPlayed(): Promise<any[]> {
-  const data = await spotifyFetch("/me/player/recently-played?limit=6");
+  const data = await spotifyFetch("/me/player/recently-played?limit=12"); // increased limit to 12 for better grid layout
   if (!data?.items?.length) return [];
   const recentlyPlayed = data.items
     .filter((item: any) => item?.track?.name)
     .map((item: any) => ({
       title: item.track.name,
+      artist: item.track.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
       id: item.track.id,
       ago: formatRelativeTime(item.played_at),
       cover: item.track.album?.images?.[0]?.url || "bg-gradient-to-br from-blue-900 to-indigo-950",

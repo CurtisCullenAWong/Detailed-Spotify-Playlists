@@ -276,14 +276,16 @@ export default function Workspace({
   const groupDragItemRef = useRef<string | null>(null);
   const groupDragOverRef = useRef<string | null>(null);
 
-  type ColId = "title" | "trackNumber" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
+  type ColId = "title" | "trackNumber" | "artist" | "firstArtist" | "album" | "genre" | "firstGenre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
 
   const colMinWidths: Record<ColId, string> = {
     title: "min-w-[360px]",
     trackNumber: "min-w-[120px]",
     artist: "min-w-[240px]",
+    firstArtist: "min-w-[240px]",
     album: "min-w-[240px]",
     genre: "min-w-[120px]",
+    firstGenre: "min-w-[120px]",
     releaseYear: "min-w-[90px]",
     releaseDate: "min-w-[130px]",
     dateAdded: "min-w-[160px]",
@@ -301,7 +303,7 @@ export default function Workspace({
   };
 
   const isColCentered = (col: ColId): boolean => {
-    return col !== "title" && col !== "artist" && col !== "album" && col !== "genre";
+    return col !== "title" && col !== "artist" && col !== "firstArtist" && col !== "album" && col !== "genre" && col !== "firstGenre";
   };
 
   const [columnOrder, setColumnOrder] = useState<ColId[]>(preferences.workspaceColumnOrder as ColId[]);
@@ -310,7 +312,7 @@ export default function Workspace({
   const dragOverColRef = useRef<ColId | null>(null);
 
   const DEPRECATED_COLUMNS = React.useMemo(() => new Set<ColId>([
-    "genre", "bpm", "energy", "popularity", "danceability", "valence",
+    "genre", "firstGenre", "bpm", "energy", "popularity", "danceability", "valence",
     "acousticness", "instrumentalness", "speechiness", "liveness", "loudness"
   ]), []);
 
@@ -336,10 +338,10 @@ export default function Workspace({
       if (sortKey && DEPRECATED_COLUMNS.has(sortKey as ColId)) {
         setSortKey(null);
       }
-      if (groupBy === "genre") {
+      if (groupBy === "genre" || groupBy === "firstGenre") {
         setGroupBy("none");
       }
-      if (subGroupBy === "genre") {
+      if (subGroupBy === "genre" || subGroupBy === "firstGenre") {
         setSubGroupBy("none");
       }
     }
@@ -487,10 +489,12 @@ export default function Workspace({
   const groupedData: GroupedData[] = React.useMemo(() => {
     if (groupBy === "none") return [];
 
-    const getGroupValue = (t: Track, field: "artist" | "album" | "genre" | "releaseYear"): string => {
+    const getGroupValue = (t: Track, field: GroupBy): string => {
       if (field === "artist") return t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist";
+      if (field === "firstArtist") return t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist";
       if (field === "album") return t.album || "Unknown Album";
       if (field === "genre") return t.genre || "Unknown Genre";
+      if (field === "firstGenre") return t.genre ? t.genre.split(",")[0].trim() : "Unknown Genre";
       if (field === "releaseYear") return String(t.releaseYear || "Unknown Year");
       return "";
     };
@@ -1064,8 +1068,10 @@ export default function Workspace({
         const [field, val] = part.split(":");
         const getGroupValue = (t: Track, f: string): string => {
           if (f === "artist") return t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist";
+          if (f === "firstArtist") return t.artist ? t.artist.split(",")[0].trim() : "Unknown Artist";
           if (f === "album") return t.album || "Unknown Album";
           if (f === "genre") return t.genre || "Unknown Genre";
+          if (f === "firstGenre") return t.genre ? t.genre.split(",")[0].trim() : "Unknown Genre";
           if (f === "releaseYear") return String(t.releaseYear || "Unknown Year");
           return "";
         };
@@ -1909,6 +1915,24 @@ export default function Workspace({
                                 </td>
                               );
                             }
+                            if (colId === "firstArtist") {
+                              const displayArtist = (track.artist || "").split(",")[0].trim();
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <div 
+                                    onClick={(e) => {
+                                      if (track.artistId) {
+                                        e.stopPropagation();
+                                        onNavigateToArtist(track.artistId);
+                                      }
+                                    }}
+                                    className={track.artistId ? "cursor-pointer hover:underline hover:text-[#1DB954] transition-colors" : ""}
+                                  >
+                                    <TextCarousel text={displayArtist} className="text-[#B3B3B3] text-[13px] max-w-[200px]" />
+                                  </div>
+                                </td>
+                              );
+                            }
                             if (colId === "artist") {
                               return (
                                 <td key={colId} className="px-3 py-2.5">
@@ -1940,6 +1964,14 @@ export default function Workspace({
                                   >
                                     <TextCarousel text={track.album} className="text-[#B3B3B3] text-[13px] max-w-[200px]" />
                                   </div>
+                                </td>
+                              );
+                            }
+                            if (colId === "firstGenre") {
+                              const displayGenre = (track.genre || "").split(",")[0].trim();
+                              return (
+                                <td key={colId} className="px-3 py-2.5">
+                                  <TextCarousel text={displayGenre} className="text-[11px] text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded-full max-w-[140px]" />
                                 </td>
                               );
                             }

@@ -613,6 +613,8 @@ export default function App() {
                 setPage("workspace");
               }}
               enableDeprecatedApis={enableDeprecatedApis}
+              playlists={playlists}
+              recentlyPlayed={recentlyPlayed}
             />
           )}
           {page === "song" && selectedTrackId && (

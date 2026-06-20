@@ -12,7 +12,7 @@ export interface NavItem {
 // This file exports types for consistency
 
 export interface ColumnDefinition {
-  id: "title" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness" | "trackNumber";
+  id: "title" | "artist" | "firstArtist" | "album" | "genre" | "firstGenre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness" | "trackNumber";
   label: string;
   groupable?: boolean;
 }
@@ -20,9 +20,11 @@ export interface ColumnDefinition {
 export const ALL_COLUMNS: ColumnDefinition[] = [
   { id: "title", label: "Title" },
   { id: "trackNumber", label: "Track #" },
+  { id: "firstArtist", label: "Artist", groupable: true },
   { id: "artist", label: "Artists", groupable: true },
   { id: "album", label: "Album", groupable: true },
-  { id: "genre", label: "Genre", groupable: true },
+  { id: "firstGenre", label: "Genre", groupable: true },
+  { id: "genre", label: "Genres", groupable: true },
   { id: "releaseYear", label: "Year", groupable: true },
   { id: "releaseDate", label: "Release Date" },
   { id: "dateAdded", label: "Date Added" },
@@ -39,12 +41,14 @@ export const ALL_COLUMNS: ColumnDefinition[] = [
   { id: "duration", label: "Time" },
 ];
 
-export type GroupByOption = "artist" | "album" | "genre" | "releaseYear" | "none";
+export type GroupByOption = "artist" | "firstArtist" | "album" | "genre" | "firstGenre" | "releaseYear" | "none";
 
 export const GROUP_BY_LABELS: Record<GroupByOption, string> = {
   artist: "Artists",
+  firstArtist: "Artist",
   album: "Album",
-  genre: "Genre",
+  genre: "Genres",
+  firstGenre: "Genre",
   releaseYear: "Release Year",
   none: "None",
 };

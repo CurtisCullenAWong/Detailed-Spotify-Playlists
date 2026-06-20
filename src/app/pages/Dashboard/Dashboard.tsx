@@ -369,11 +369,9 @@ export default function Dashboard({
                   <div className="text-center">
                     <p className="text-white text-[13px] font-semibold truncate max-w-[100px]">{artist.name}</p>
                     {enableDeprecatedApis && (
-                      <>
-                        <p className="text-[#B3B3B3] text-[11px] truncate max-w-[100px]">{artist.genre}</p>
-                        <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} plays</p>
-                      </>
+                      <p className="text-[#B3B3B3] text-[11px] truncate max-w-[100px]">{artist.genre}</p>
                     )}
+                    <p className="text-[#1DB954] text-[11px] font-mono">{artist.plays} plays</p>
                   </div>
                 </button>
               ))}
