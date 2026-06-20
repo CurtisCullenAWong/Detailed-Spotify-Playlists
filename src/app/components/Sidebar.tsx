@@ -15,7 +15,7 @@ import { loadPreferences, PreferenceUpdaters } from "../../utils/userPreferences
 import { isUrlOrData } from "../../utils/spotifyHelpers";
 import LibraryPlaylists from "./LibraryPlaylists";
 
-type Page = "dashboard" | "workspace" | "api" | "search" | "libraries";
+type Page = "dashboard" | "workspace" | "api" | "search" | "libraries" | "song" | "artist" | "album";
 
 interface SidebarProps {
   page: Page;

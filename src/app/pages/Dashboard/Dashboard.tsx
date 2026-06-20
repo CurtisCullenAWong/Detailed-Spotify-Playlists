@@ -48,6 +48,8 @@ interface DashboardProps {
   libraryView: "all" | "yours" | "followed";
   setLibraryView: (view: "all" | "yours" | "followed") => void;
   onToggleMobileSidebar?: () => void;
+  onNavigateToArtist?: (id: string) => void;
+  onNavigateToTrack?: (id: string | number) => void;
 }
 
 export default function Dashboard({
@@ -68,6 +70,8 @@ export default function Dashboard({
   libraryView,
   setLibraryView,
   onToggleMobileSidebar,
+  onNavigateToArtist,
+  onNavigateToTrack,
 }: DashboardProps) {
   const [hoveredPlaylist, setHoveredPlaylist] = useState<string | number | null>(null);
   const [headerDropdownOpen, setHeaderDropdownOpen] = useState(false);
@@ -279,12 +283,16 @@ export default function Dashboard({
                 <button
                   key={i}
                   onClick={() => {
-                    const trackUris = recentlyPlayed.map(rp => rp.uri).filter(Boolean);
-                    if (trackUris.length > 0) {
-                      playTrack({
-                        uris: trackUris,
-                        offset: { position: i }
-                      }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"));
+                    if (onNavigateToTrack && item.id) {
+                      onNavigateToTrack(item.id);
+                    } else {
+                      const trackUris = recentlyPlayed.map(rp => rp.uri).filter(Boolean);
+                      if (trackUris.length > 0) {
+                        playTrack({
+                          uris: trackUris,
+                          offset: { position: i }
+                        }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"));
+                      }
                     }
                   }}
                   className="group flex items-center gap-3 bg-[#181818] hover:bg-[#282828] rounded-md overflow-hidden pr-3 transition-all text-left cursor-pointer w-full focus:outline-none"
@@ -297,11 +305,17 @@ export default function Dashboard({
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-white text-[13px] font-semibold truncate">{item.title}</p>
+                    <p className="text-white text-[13px] font-semibold truncate hover:underline">{item.title}</p>
                     <p className="text-[#B3B3B3] text-[11px] truncate">{item.ago}</p>
                   </div>
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <div className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center">
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playTrack({ uris: [item.uri] }).catch(() => toast.error("Could not start playback. Is Spotify open on an active device?"));
+                      }}
+                      className="w-7 h-7 bg-[#1DB954] rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
+                    >
                       <Play size={12} className="text-black fill-black ml-0.5" />
                     </div>
                   </div>
@@ -333,7 +347,9 @@ export default function Dashboard({
                 <button
                   key={i}
                   onClick={() => {
-                    if (setSearchQuery) {
+                    if (onNavigateToArtist && artist.id) {
+                      onNavigateToArtist(artist.id);
+                    } else if (setSearchQuery) {
                       setSearchQuery(artist.name);
                       setPage("search");
                     }

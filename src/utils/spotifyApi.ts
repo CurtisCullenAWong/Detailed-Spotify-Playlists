@@ -370,7 +370,9 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
       id: t.id,
       title: t.name,
       artist: t.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
+      artistId: primaryArtistId,
       album: t.album?.name || "Unknown Album",
+      albumId: t.album?.id,
       cover: t.album?.images?.[0]?.url || "",
       genre: genre === "-" ? "-" : genre.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
       releaseYear: t.album?.release_date ? new Date(t.album.release_date).getFullYear() : 2024,
@@ -635,6 +637,7 @@ export async function getRecentlyPlayed(): Promise<any[]> {
     .filter((item: any) => item?.track?.name)
     .map((item: any) => ({
       title: item.track.name,
+      id: item.track.id,
       ago: formatRelativeTime(item.played_at),
       cover: item.track.album?.images?.[0]?.url || "bg-gradient-to-br from-blue-900 to-indigo-950",
       uri: item.track.uri,
@@ -943,3 +946,36 @@ export async function removePlaylistTracksByPosition(
   });
   return response?.snapshot_id ?? null;
 }
+
+// 14. Detail Views & Non-deprecated Spotify API Endpoints
+
+// Fetch a single track by ID (non-deprecated)
+export async function getTrack(trackId: string): Promise<any> {
+  return await spotifyFetch(`/tracks/${trackId}`);
+}
+
+// Fetch a single artist by ID (non-deprecated)
+export async function getArtist(artistId: string): Promise<any> {
+  return await spotifyFetch(`/artists/${artistId}`);
+}
+
+// Fetch an artist's top tracks (non-deprecated)
+export async function getArtistTopTracks(artistId: string, market = "US"): Promise<any> {
+  return await spotifyFetch(`/artists/${artistId}/top-tracks?market=${market}`);
+}
+
+// Fetch an artist's albums (non-deprecated)
+export async function getArtistAlbums(artistId: string, limit = 20): Promise<any> {
+  return await spotifyFetch(`/artists/${artistId}/albums?limit=${limit}&include_groups=album,single`);
+}
+
+// Fetch single track audio features (deprecated)
+export async function getTrackAudioFeatures(trackId: string): Promise<any> {
+  return await spotifyFetch(`/audio-features/${trackId}`);
+}
+
+// Fetch a single album by ID (non-deprecated)
+export async function getAlbum(albumId: string): Promise<any> {
+  return await spotifyFetch(`/albums/${albumId}`);
+}
+

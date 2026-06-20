@@ -5,7 +5,9 @@ export interface Track {
   rowKey?: string;
   title: string;
   artist: string;
+  artistId?: string;
   album: string;
+  albumId?: string;
   cover?: string;
   genre: string;
   releaseYear: number;

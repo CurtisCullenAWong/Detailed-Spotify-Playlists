@@ -22,13 +22,16 @@ import Dashboard from "./pages/Dashboard/Dashboard";
 import Workspace from "./pages/Workspace/Workspace";
 import ApiReference from "./pages/ApiReference/ApiReference";
 import SearchPage from "./pages/Search/SearchPage";
+import SongView from "./pages/Song/SongView";
+import ArtistPageView from "./pages/Artist/ArtistPageView";
+import AlbumView from "./pages/Album/AlbumView";
 import NowPlayingBar from "./components/NowPlayingBar";
 import { getPlaybackTrackId, buildTrackUri, getPlaylistTrackCount } from "../utils/spotifyHelpers";
 import { readWorkspaceTrackCache, writeWorkspaceTrackCache } from "../utils/cache";
 import type { WorkspaceTrackCache } from "../utils/cache";
 import type { Track, Playlist, Artist } from "../data";
 
-type Page = "dashboard" | "workspace" | "api" | "search" | "libraries";
+type Page = "dashboard" | "workspace" | "api" | "search" | "libraries" | "song" | "artist" | "album";
 
 export default function App() {
   const preferences = loadPreferences();
@@ -73,6 +76,43 @@ export default function App() {
   const [playbackState, setPlaybackState] = useState<any>(null);
   const playbackStateRef = useRef<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [navHistory, setNavHistory] = useState<Page[]>([]);
+
+  const handleNavigateToArtist = (artistId: string) => {
+    if (!enableDeprecatedApis) {
+      toast.error("Artist View is disabled because Deprecated Features are turned off.");
+      return;
+    }
+    setNavHistory((prev) => [...prev, page]);
+    setSelectedArtistId(artistId);
+    setPage("artist");
+  };
+
+  const handleNavigateToTrack = (trackId: string | number) => {
+    setNavHistory((prev) => [...prev, page]);
+    setSelectedTrackId(String(trackId));
+    setPage("song");
+  };
+
+  const handleNavigateToAlbum = (albumId: string) => {
+    setNavHistory((prev) => [...prev, page]);
+    setSelectedAlbumId(albumId);
+    setPage("album");
+  };
+
+  const handleBack = () => {
+    if (navHistory.length > 0) {
+      const prev = navHistory[navHistory.length - 1];
+      setNavHistory((history) => history.slice(0, -1));
+      setPage(prev);
+    } else {
+      setPage("dashboard");
+    }
+  };
 
   const goToAllSongs = useCallback(() => {
     setSelectedPlaylistId("all_songs");
@@ -146,7 +186,9 @@ export default function App() {
 
   // Save preferences when they change
   useEffect(() => {
-    PreferenceUpdaters.setCurrentPage(page);
+    if (page !== "song" && page !== "artist" && page !== "album") {
+      PreferenceUpdaters.setCurrentPage(page);
+    }
   }, [page]);
 
   useEffect(() => {
@@ -522,6 +564,8 @@ export default function App() {
               libraryView={libraryView}
               setLibraryView={setLibraryView}
               onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+              onNavigateToArtist={handleNavigateToArtist}
+              onNavigateToTrack={handleNavigateToTrack}
             />
           )}
           {page === "workspace" && (
@@ -542,6 +586,9 @@ export default function App() {
               enableDeprecatedApis={enableDeprecatedApis}
               setPlayingPlaylistId={setPlayingPlaylistId}
               onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+              onNavigateToArtist={handleNavigateToArtist}
+              onNavigateToTrack={handleNavigateToTrack}
+              onNavigateToAlbum={handleNavigateToAlbum}
             />
           )}
           {page === "api" && (
@@ -557,6 +604,46 @@ export default function App() {
               query={searchQuery}
               setQuery={setSearchQuery}
               onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+              onNavigateToArtist={handleNavigateToArtist}
+              onNavigateToTrack={handleNavigateToTrack}
+              onNavigateToAlbum={handleNavigateToAlbum}
+              onNavigateToPlaylist={(playlistId) => {
+                setNavHistory((prev) => [...prev, page]);
+                setSelectedPlaylistId(playlistId);
+                setPage("workspace");
+              }}
+              enableDeprecatedApis={enableDeprecatedApis}
+            />
+          )}
+          {page === "song" && selectedTrackId && (
+            <SongView
+              trackId={selectedTrackId}
+              onBack={handleBack}
+              onNavigateToArtist={handleNavigateToArtist}
+              onNavigateToAlbum={handleNavigateToAlbum}
+              enableDeprecatedApis={enableDeprecatedApis}
+              currentPlaybackTrackId={currentPlaybackTrackId}
+            />
+          )}
+          {page === "artist" && selectedArtistId && (
+            <ArtistPageView
+              artistId={selectedArtistId}
+              onBack={handleBack}
+              onNavigateToTrack={handleNavigateToTrack}
+              onNavigateToAlbum={handleNavigateToAlbum}
+              currentPlaybackTrackId={currentPlaybackTrackId}
+            />
+          )}
+          {page === "album" && selectedAlbumId && (
+            <AlbumView
+              albumId={selectedAlbumId}
+              onBack={handleBack}
+              onNavigateToArtist={handleNavigateToArtist}
+              onNavigateToTrack={handleNavigateToTrack}
+              currentPlaybackTrackId={currentPlaybackTrackId}
+              playlists={playlists}
+              setPlaylists={setPlaylists}
+              currentUserId={currentUser?.id}
             />
           )}
         </main>

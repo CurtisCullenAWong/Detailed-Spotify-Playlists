@@ -11,6 +11,7 @@ import {
   Plus,
   Volume2,
   Pencil,
+  Copy,
   Search,
   Play,
   Heart,
@@ -215,6 +216,9 @@ interface WorkspaceProps {
   enableDeprecatedApis: boolean;
   setPlayingPlaylistId: (id: string | number | null) => void;
   onToggleMobileSidebar?: () => void;
+  onNavigateToArtist: (id: string) => void;
+  onNavigateToTrack: (id: string | number) => void;
+  onNavigateToAlbum: (id: string) => void;
 }
 
 export default function Workspace({
@@ -233,10 +237,14 @@ export default function Workspace({
   enableDeprecatedApis,
   setPlayingPlaylistId,
   onToggleMobileSidebar,
+  onNavigateToArtist,
+  onNavigateToTrack,
+  onNavigateToAlbum,
 }: WorkspaceProps) {
   const preferences = loadPreferences();
 
   const [search, setSearch] = useState(preferences.workspaceSearch);
+  const [showOverlap, setShowOverlap] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createModalTrackUris, setCreateModalTrackUris] = useState<string[]>([]);
@@ -271,10 +279,10 @@ export default function Workspace({
   type ColId = "title" | "trackNumber" | "artist" | "album" | "genre" | "releaseYear" | "releaseDate" | "dateAdded" | "bpm" | "energy" | "popularity" | "duration" | "danceability" | "valence" | "acousticness" | "instrumentalness" | "speechiness" | "liveness" | "loudness";
 
   const colMinWidths: Record<ColId, string> = {
-    title: "min-w-[220px]",
+    title: "min-w-[360px]",
     trackNumber: "min-w-[120px]",
-    artist: "min-w-[150px]",
-    album: "min-w-[150px]",
+    artist: "min-w-[240px]",
+    album: "min-w-[240px]",
     genre: "min-w-[120px]",
     releaseYear: "min-w-[90px]",
     releaseDate: "min-w-[130px]",
@@ -419,8 +427,31 @@ export default function Workspace({
     return map;
   }, [orderedPlaylistTracks]);
 
+  const overlapTrackIds = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    playlistTracks.forEach(t => {
+      const cleanTitle = (t.title || "").split(" - ")[0].trim().toLowerCase();
+      const key = `${cleanTitle}|${t.artist?.trim().toLowerCase() || ""}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+
+    const overlapIds = new Set<string | number>();
+    playlistTracks.forEach(t => {
+      const cleanTitle = (t.title || "").split(" - ")[0].trim().toLowerCase();
+      const key = `${cleanTitle}|${t.artist?.trim().toLowerCase() || ""}`;
+      if ((counts.get(key) || 0) > 1) {
+        overlapIds.add(t.id);
+      }
+    });
+    return overlapIds;
+  }, [playlistTracks]);
+
   const filtered = React.useMemo(() => {
-    return orderedPlaylistTracks.filter((t) => {
+    let tracks = orderedPlaylistTracks;
+    if (showOverlap) {
+      tracks = tracks.filter(t => overlapTrackIds.has(t.id));
+    }
+    return tracks.filter((t) => {
       if (!t) return false;
       const q = search.toLowerCase();
       const title = (t.title || "").toLowerCase();
@@ -429,7 +460,7 @@ export default function Workspace({
       const genre = (t.genre || "").toLowerCase();
       return title.includes(q) || artist.includes(q) || album.includes(q) || genre.includes(q);
     });
-  }, [orderedPlaylistTracks, search]);
+  }, [orderedPlaylistTracks, search, showOverlap, overlapTrackIds]);
 
   const flatSortedTracks = React.useMemo(() => {
     if (!sortKey) return filtered;
@@ -562,7 +593,7 @@ export default function Workspace({
   // Reset visible row count whenever playlist or sort changes
   useEffect(() => {
     setVisibleRowCount(LAZY_ROW_STEP);
-  }, [selectedPlaylistId, sortKey, sortDir, groupBy, search]);
+  }, [selectedPlaylistId, sortKey, sortDir, groupBy, search, showOverlap]);
 
   // IntersectionObserver to load more rows when sentinel is visible
   useEffect(() => {
@@ -1234,8 +1265,8 @@ export default function Workspace({
             <Play size={18} className="text-black fill-black ml-0.5" />
           </button>
 
-          {(isYours || isEditable) && (
-            <div className="flex items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md">
+          {(isYours || isEditable || selected.size > 0) && (
+            <div className="flex flex-wrap items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-2xl sm:rounded-full p-0.5 shadow-md animate-in fade-in duration-200">
               {isYours && (
                 <button
                   onClick={handleSavePlaylistOrder}
@@ -1259,7 +1290,7 @@ export default function Workspace({
                 </button>
               )}
 
-              {isYours && isEditable && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />}
+              {isYours && isEditable && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />}
 
               {isEditable && (
                 <button
@@ -1272,8 +1303,131 @@ export default function Workspace({
                   <span>Edit Details</span>
                 </button>
               )}
+
+              {selected.size > 0 && (
+                <>
+                  {(isYours || isEditable) && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />}
+                  
+                  <span className="text-xs text-[#B3B3B3] font-bold px-3 select-none">
+                    {selected.size} selected
+                  </span>
+
+                  {isYours && (
+                    <>
+                      <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
+                      <button
+                        onClick={handleDelete}
+                        title="Remove selected tracks from playlist"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        <Trash2 size={12} />
+                        <span>Remove</span>
+                      </button>
+                    </>
+                  )}
+
+                  {isYours && (
+                    <>
+                      <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
+                      <button
+                        type="button"
+                        onClick={handleRemoveDuplicates}
+                        disabled={!hasDuplicates || isRemovingDuplicates || hasUnsavedTrackOrder}
+                        title={
+                          hasUnsavedTrackOrder
+                            ? "Please save your custom track order before removing duplicates"
+                            : !hasDuplicates
+                            ? "No duplicate tracks found in this playlist"
+                            : "Remove duplicate tracks, keeping the first occurrence of each"
+                        }
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+                          isRemovingDuplicates
+                            ? "bg-[#e91429] text-white cursor-wait"
+                            : hasDuplicates && !hasUnsavedTrackOrder
+                            ? "hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 cursor-pointer font-bold"
+                            : "text-[#535353] cursor-not-allowed"
+                        }`}
+                      >
+                        <Trash2 size={12} className={isRemovingDuplicates ? "animate-pulse" : ""} />
+                        <span>Remove Duplicates</span>
+                      </button>
+                    </>
+                  )}
+
+                  <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
+                  <div className="relative" data-playlist-flyout>
+                    <button
+                      onClick={() => setPlaylistFlyoutOpen(o => !o)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-white/5 text-white text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+                    >
+                      <Plus size={12} />
+                      <span>Add to Playlist</span>
+                      <ChevronDown size={10} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {playlistFlyoutOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 overflow-hidden">
+                        <div className="px-4 py-2.5 border-b border-[#383838]">
+                          <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
+                        </div>
+                        <div className="max-h-52 overflow-y-auto py-1">
+                          <button
+                            type="button"
+                            onClick={handleCreatePlaylist}
+                            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer border-b border-[#383838]"
+                          >
+                            <div className="w-8 h-8 rounded shrink-0 bg-[#1DB954] flex items-center justify-center text-black font-bold">
+                              <Plus size={16} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-white text-[13px] font-medium truncate">Create New Playlist</p>
+                              <p className="text-[#B3B3B3] text-[11px]">Start a new playlist with these tracks</p>
+                            </div>
+                          </button>
+                          {playlists.filter(pl => pl.owner === "yours").length === 0 ? (
+                            <div className="px-4 py-3 text-xs text-[#888888]">No playlists owned by you.</div>
+                          ) : (
+                            playlists.filter(pl => pl.owner === "yours").map(pl => (
+                              <button
+                                key={pl.id}
+                                type="button"
+                                onClick={() => handleAddToPlaylist(pl.id)}
+                                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer"
+                              >
+                                <div className="w-8 h-8 rounded shrink-0 bg-[#383838] overflow-hidden">
+                                  {pl.cover.startsWith("http") ? (
+                                    <img src={pl.cover} className="w-full h-full object-cover" alt="" />
+                                  ) : (
+                                    <div className={`w-full h-full ${pl.cover}`} />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-white text-[13px] font-medium truncate">{pl.name}</p>
+                                  <p className="text-[#B3B3B3] text-[11px]">{getPlaylistTrackCount(pl)} tracks</p>
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowOverlap(o => !o)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${
+              showOverlap
+                ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 font-bold hover:bg-[#1DB954]/25"
+                : "bg-[#282828] text-white/90 border-[#3e3e3e]/80 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            <Copy size={12} className={showOverlap ? "text-[#1DB954]" : "text-white/70"} />
+            <span>Show Song Overlap</span>
+          </button>
         </div>
 
         {/* Right Side: Filters, Search, View, Selection Options */}
@@ -1293,11 +1447,11 @@ export default function Workspace({
 
 
 
-          <div className="flex items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md">
+          <div className="flex flex-wrap items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-2xl sm:rounded-full p-0.5 shadow-md">
             <div className="relative" data-groupby-dropdown>
               <button
                 onClick={() => setGroupByOpen(o => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${groupByOpen
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${groupByOpen
                   ? "bg-[#333333] text-white"
                   : groupBy !== "none"
                     ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
@@ -1306,9 +1460,9 @@ export default function Workspace({
               >
                 <ListMusic size={12} className={groupBy !== "none" ? "text-[#1DB954]" : ""} />
                 <span>
-                  Group By:{" "}
+                  Group:{" "}
                   <span className={groupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>
-                    {getGroupHeaderLabel(groupBy, groupBySortKey, groupByDir)}
+                    {groupBy === "none" ? "None" : (GROUP_BY_LABELS[groupBy] || groupBy)}
                   </span>
                 </span>
                 <ChevronDown size={10} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
@@ -1408,11 +1562,11 @@ export default function Workspace({
 
             {groupBy !== "none" && (
               <>
-                <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />
+                <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
                 <div className="relative" data-subgroupby-dropdown>
                   <button
                     onClick={() => setSubGroupByOpen(o => !o)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${subGroupByOpen
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${subGroupByOpen
                       ? "bg-[#333333] text-white"
                       : subGroupBy !== "none"
                         ? "text-[#1DB954] hover:bg-[#1DB954]/10 font-bold"
@@ -1423,7 +1577,7 @@ export default function Workspace({
                     <span>
                       Sub-group:{" "}
                       <span className={subGroupBy !== "none" ? "text-[#1DB954] font-bold" : "text-white font-semibold"}>
-                        {getGroupHeaderLabel(subGroupBy, subGroupBySortKey, subGroupByDir)}
+                        {subGroupBy === "none" ? "None" : (GROUP_BY_LABELS[subGroupBy] || subGroupBy)}
                       </span>
                     </span>
                     <ChevronDown size={10} className={`transition-transform duration-200 ${subGroupByOpen ? "rotate-180" : ""}`} />
@@ -1519,12 +1673,12 @@ export default function Workspace({
               </>
             )}
 
-            <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1" />
+            <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
 
             <div className="relative" data-cols-dropdown>
               <button
                 onClick={() => setColumnsOpen(o => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap cursor-pointer ${columnsOpen
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${columnsOpen
                   ? "bg-white text-black"
                   : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
                   }`}
@@ -1565,7 +1719,7 @@ export default function Workspace({
                   const allCollapsed = collapsedGroups.size >= totalGroupKeys.length && totalGroupKeys.length > 0;
                   return (
                     <>
-                      <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 animate-in fade-in duration-200" />
+                      <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block animate-in fade-in duration-200" />
                       <button
                         onClick={() => {
                           if (allCollapsed) {
@@ -1574,7 +1728,7 @@ export default function Workspace({
                             setCollapsedGroups(new Set(totalGroupKeys));
                           }
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all text-[#B3B3B3] hover:text-white hover:bg-white/5 whitespace-nowrap cursor-pointer animate-in fade-in duration-200"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all text-[#B3B3B3] hover:text-white hover:bg-white/5 whitespace-nowrap cursor-pointer animate-in fade-in duration-200"
                         title={allCollapsed ? "Expand all sections" : "Collapse all sections"}
                       >
                         {allCollapsed ? (
@@ -1596,106 +1750,6 @@ export default function Workspace({
             )}
           </div>
 
-          {selected.size > 0 && (
-            <div className="flex items-center bg-[#181818] border border-[#3e3e3e]/80 rounded-full p-0.5 shadow-md animate-in fade-in slide-in-from-right-4 duration-200">
-              <span className="text-[11px] text-[#B3B3B3] font-bold px-3 border-r border-[#3e3e3e]/80 select-none">
-                {selected.size} selected
-              </span>
-
-              <div className="flex items-center gap-0.5 px-0.5">
-                {isYours && (
-                  <button
-                    onClick={handleDelete}
-                    title="Remove selected tracks from playlist"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 text-[12px] font-semibold transition-all cursor-pointer whitespace-nowrap"
-                  >
-                    <Trash2 size={12} />
-                    <span>Remove</span>
-                  </button>
-                )}
-
-                {isYours && (
-                  <button
-                    type="button"
-                    onClick={handleRemoveDuplicates}
-                    disabled={!hasDuplicates || isRemovingDuplicates || hasUnsavedTrackOrder}
-                    title={
-                      hasUnsavedTrackOrder
-                        ? "Please save your custom track order before removing duplicates"
-                        : !hasDuplicates
-                        ? "No duplicate tracks found in this playlist"
-                        : "Remove duplicate tracks, keeping the first occurrence of each"
-                    }
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap ${
-                      isRemovingDuplicates
-                        ? "bg-[#e91429] text-white cursor-wait"
-                        : hasDuplicates && !hasUnsavedTrackOrder
-                        ? "hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 cursor-pointer font-bold animate-pulse"
-                        : "text-[#535353] cursor-not-allowed"
-                    }`}
-                  >
-                    <Trash2 size={12} className={isRemovingDuplicates ? "animate-pulse" : ""} />
-                    <span>Remove Duplicates</span>
-                  </button>
-                )}
-
-                {isYours && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-0.5" />}
-
-                <div className="relative" data-playlist-flyout>
-                  <button
-                    onClick={() => setPlaylistFlyoutOpen(o => !o)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-white/5 text-white text-[12px] font-semibold transition-all cursor-pointer whitespace-nowrap"
-                  >
-                    <Plus size={12} />
-                    <span>Add to Playlist</span>
-                    <ChevronDown size={10} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {playlistFlyoutOpen && (
-                    <div className="absolute top-full right-0 mt-1 w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 overflow-hidden">
-                      <div className="px-4 py-2.5 border-b border-[#383838]">
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
-                      </div>
-                      <div className="max-h-52 overflow-y-auto py-1">
-                        <button
-                          type="button"
-                          onClick={handleCreatePlaylist}
-                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer border-b border-[#383838]"
-                        >
-                          <div className="w-8 h-8 rounded shrink-0 bg-[#1DB954] flex items-center justify-center text-black font-bold">
-                            <Plus size={16} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-white text-[13px] font-medium truncate">Create New Playlist</p>
-                            <p className="text-[#B3B3B3] text-[11px]">Start a new playlist with these tracks</p>
-                          </div>
-                        </button>
-                        {playlists.filter(pl => pl.owner === "yours").length === 0 ? (
-                          <div className="px-4 py-3 text-xs text-[#888888]">No playlists owned by you.</div>
-                        ) : (
-                          playlists.filter(pl => pl.owner === "yours").map(pl => (
-                            <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id)}
-                              className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#383838] transition-colors text-left cursor-pointer">
-                              <div className="w-8 h-8 rounded shrink-0 bg-[#383838] overflow-hidden">
-                                {pl.cover.startsWith("http") ? (
-                                  <img src={pl.cover} className="w-full h-full object-cover" alt="" />
-                                ) : (
-                                  <div className={`w-full h-full ${pl.cover}`} />
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-white text-[13px] font-medium truncate">{pl.name}</p>
-                                <p className="text-[#B3B3B3] text-[11px]">{getPlaylistTrackCount(pl)} tracks</p>
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1730,7 +1784,7 @@ export default function Workspace({
 
         <div ref={tableScrollRef} className={`h-full overflow-auto ${(loadingTracks && playlistTracks.length === 0) ? "opacity-0 pointer-events-none" : ""}`}>
 
-          <table className="w-full min-w-[860px] border-collapse">
+          <table className="w-full min-w-[1200px] border-collapse">
             <thead className="sticky top-0 z-10 bg-[#121212]">
               <tr className="border-b border-[#282828]">
                 <th className="w-10 px-4 py-3 text-left">
@@ -1815,7 +1869,10 @@ export default function Workspace({
                               return (
                                 <td key={colId} className="px-3 py-2.5">
                                   <div className={`flex items-center gap-3 ${isNested ? "pl-6" : ""}`}>
-                                    <div className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
+                                    <div 
+                                      onClick={(e) => { e.stopPropagation(); onNavigateToTrack(track.id); }}
+                                      className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
+                                    >
                                       {trackImage ? (
                                         <ImageWithFallback src={trackImage} alt="" className="w-full h-full object-cover" />
                                       ) : (
@@ -1823,8 +1880,23 @@ export default function Workspace({
                                       )}
                                     </div>
                                     <div className="min-w-0 flex flex-col">
-                                      <TextCarousel text={track.title} className="text-white text-[13px] font-semibold max-w-[180px]" />
-                                      <TextCarousel text={(track.artist || "").split(", ")[0]} className="text-[#B3B3B3] text-[11px] max-w-[180px]" />
+                                      <div 
+                                        onClick={(e) => { e.stopPropagation(); onNavigateToTrack(track.id); }}
+                                        className="cursor-pointer hover:underline hover:text-[#1DB954] transition-colors"
+                                      >
+                                        <TextCarousel text={track.title} className="text-white text-[13px] font-semibold max-w-[300px]" />
+                                      </div>
+                                      <div 
+                                        onClick={(e) => {
+                                          if (track.artistId) {
+                                            e.stopPropagation();
+                                            onNavigateToArtist(track.artistId);
+                                          }
+                                        }}
+                                        className={track.artistId ? "cursor-pointer hover:underline hover:text-white transition-colors" : ""}
+                                      >
+                                        <TextCarousel text={(track.artist || "").split(", ")[0]} className="text-[#B3B3B3] text-[11px] max-w-[300px]" />
+                                      </div>
                                     </div>
                                   </div>
                                 </td>
@@ -1840,14 +1912,34 @@ export default function Workspace({
                             if (colId === "artist") {
                               return (
                                 <td key={colId} className="px-3 py-2.5">
-                                  <TextCarousel text={track.artist} className="text-[#B3B3B3] text-[13px] max-w-[140px]" />
+                                  <div 
+                                    onClick={(e) => {
+                                      if (track.artistId) {
+                                        e.stopPropagation();
+                                        onNavigateToArtist(track.artistId);
+                                      }
+                                    }}
+                                    className={track.artistId ? "cursor-pointer hover:underline hover:text-[#1DB954] transition-colors" : ""}
+                                  >
+                                    <TextCarousel text={track.artist} className="text-[#B3B3B3] text-[13px] max-w-[200px]" />
+                                  </div>
                                 </td>
                               );
                             }
                             if (colId === "album") {
                               return (
                                 <td key={colId} className="px-3 py-2.5">
-                                  <TextCarousel text={track.album} className="text-[#B3B3B3] text-[13px] max-w-[140px]" />
+                                  <div 
+                                    onClick={(e) => {
+                                      if (track.albumId) {
+                                        e.stopPropagation();
+                                        onNavigateToAlbum(track.albumId);
+                                      }
+                                    }}
+                                    className={track.albumId ? "cursor-pointer hover:underline hover:text-[#1DB954] transition-colors" : ""}
+                                  >
+                                    <TextCarousel text={track.album} className="text-[#B3B3B3] text-[13px] max-w-[200px]" />
+                                  </div>
                                 </td>
                               );
                             }
