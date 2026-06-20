@@ -798,6 +798,13 @@ export async function toggleRepeat(state: "track" | "context" | "off", deviceId?
 
 // 9. Playlist Management
 export async function addTracksToPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
+  if (playlistId === "liked") {
+    const queryParams = new URLSearchParams({ uris: trackUris.join(",") });
+    await spotifyFetch(`/me/library?${queryParams.toString()}`, {
+      method: "PUT",
+    });
+    return;
+  }
   await spotifyFetch(`/playlists/${playlistId}/items`, {
     method: "POST",
     body: JSON.stringify({ uris: trackUris }),
@@ -805,6 +812,13 @@ export async function addTracksToPlaylist(playlistId: string | number, trackUris
 }
 
 export async function removeTracksFromPlaylist(playlistId: string | number, trackUris: string[]): Promise<void> {
+  if (playlistId === "liked") {
+    const queryParams = new URLSearchParams({ uris: trackUris.join(",") });
+    await spotifyFetch(`/me/library?${queryParams.toString()}`, {
+      method: "DELETE",
+    });
+    return;
+  }
   await spotifyFetch(`/playlists/${playlistId}/items`, {
     method: "DELETE",
     body: JSON.stringify({

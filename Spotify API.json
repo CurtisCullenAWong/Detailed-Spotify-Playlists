@@ -136,6 +136,127 @@
                   "variable": []
                 }
               }
+            },
+            {
+              "name": "Get User's Followed Artists",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "Get the current user's followed artists. Requires the user-follow-read scope.",
+                "url": {
+                  "raw": "{{base_url}}/me/following?type=artist&limit=20",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "me",
+                    "following"
+                  ],
+                  "query": [
+                    {
+                      "key": "type",
+                      "value": "artist",
+                      "description": "The ID type: currently only artist is supported."
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "The maximum number of items to return (1-50)."
+                    },
+                    {
+                      "key": "after",
+                      "value": "",
+                      "description": "The last artist ID retrieved from the previous request (for cursor-based pagination)."
+                    }
+                  ],
+                  "variable": []
+                }
+              }
+            },
+            {
+              "name": "Check if User Follows Users or Artists",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "Check to see if the current user is following one or more artists or other Spotify users.",
+                "url": {
+                  "raw": "{{base_url}}/me/following/contains?type=artist&ids=2YZyLoL8N0Wb9xBt1NhZWg",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "me",
+                    "following",
+                    "contains"
+                  ],
+                  "query": [
+                    {
+                      "key": "type",
+                      "value": "artist",
+                      "description": "The ID type: either artist or user."
+                    },
+                    {
+                      "key": "ids",
+                      "value": "2YZyLoL8N0Wb9xBt1NhZWg",
+                      "description": "A comma-separated list of the artist or the user Spotify IDs."
+                    }
+                  ],
+                  "variable": []
+                }
+              }
+            },
+            {
+              "name": "Get User's Profile",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "Get public profile information about a Spotify user.",
+                "url": {
+                  "raw": "{{base_url}}/users/{{user_id}}",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "users",
+                    "{{user_id}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                }
+              }
             }
           ]
         },
@@ -639,6 +760,89 @@
                   "variable": []
                 }
               }
+            },
+            {
+              "name": "[DEPRECATED] Get Recommendations",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "DEPRECATED. Get recommendations based on seed artists, tracks, and genres.",
+                "url": {
+                  "raw": "{{base_url}}/recommendations?limit=20&seed_artists=4NHQUGzpt8vH7Rb2421vCu",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "recommendations"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "The target size of the list of recommended tracks."
+                    },
+                    {
+                      "key": "seed_artists",
+                      "value": "4NHQUGzpt8vH7Rb2421vCu",
+                      "description": "A comma-separated list of Spotify IDs for seed artists."
+                    },
+                    {
+                      "key": "seed_tracks",
+                      "value": "",
+                      "description": "A comma-separated list of Spotify IDs for seed tracks."
+                    },
+                    {
+                      "key": "seed_genres",
+                      "value": "",
+                      "description": "A comma-separated list of seed genres."
+                    }
+                  ],
+                  "variable": []
+                }
+              }
+            },
+            {
+              "name": "[DEPRECATED] Get Artist's Related Artists",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "DEPRECATED. Get Spotify catalog information about artists similar to a given artist.",
+                "url": {
+                  "raw": "{{base_url}}/artists/{{artist_id}}/related-artists",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "artists",
+                    "{{artist_id}}",
+                    "related-artists"
+                  ],
+                  "query": [],
+                  "variable": []
+                }
+              }
             }
           ]
         },
@@ -1074,6 +1278,131 @@
                       "key": "offset",
                       "value": "0",
                       "description": "Pagination offset"
+                    }
+                  ],
+                  "variable": []
+                }
+              }
+            },
+            {
+              "name": "[DEPRECATED] Get Featured Playlists",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "DEPRECATED. Get a list of Spotify featured playlists.",
+                "url": {
+                  "raw": "{{base_url}}/browse/featured-playlists?limit=20&offset=0",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "browse",
+                    "featured-playlists"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "The maximum number of items to return (1-50)."
+                    },
+                    {
+                      "key": "offset",
+                      "value": "0",
+                      "description": "The index of the first item to return."
+                    }
+                  ],
+                  "variable": []
+                }
+              }
+            },
+            {
+              "name": "[DEPRECATED] Get Category's Playlists",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "DEPRECATED. Get a list of Spotify playlists tagged with a particular category.",
+                "url": {
+                  "raw": "{{base_url}}/browse/categories/{{category_id}}/playlists?limit=20&offset=0",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "browse",
+                    "categories",
+                    "{{category_id}}",
+                    "playlists"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "The maximum number of items to return (1-50)."
+                    },
+                    {
+                      "key": "offset",
+                      "value": "0",
+                      "description": "The index of the first item to return."
+                    }
+                  ],
+                  "variable": []
+                }
+              }
+            },
+            {
+              "name": "Check if Users Follow Playlist",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "Check to see if one or more Spotify users are following a specified playlist.",
+                "url": {
+                  "raw": "{{base_url}}/playlists/{{playlist_id}}/followers/contains?ids=user1,user2",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "playlists",
+                    "{{playlist_id}}",
+                    "followers",
+                    "contains"
+                  ],
+                  "query": [
+                    {
+                      "key": "ids",
+                      "value": "user1,user2",
+                      "description": "A comma-separated list of Spotify User IDs."
                     }
                   ],
                   "variable": []
@@ -1594,6 +1923,53 @@
                   "options": {
                     "raw": {
                       "language": "text"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Follow Playlist",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "Add the current user as a follower of a playlist.",
+                "url": {
+                  "raw": "{{base_url}}/playlists/{{playlist_id}}/followers",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "playlists",
+                    "{{playlist_id}}",
+                    "followers"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"public\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
                     }
                   }
                 }
@@ -2455,6 +2831,38 @@
                       "language": "json"
                     }
                   }
+                }
+              }
+            },
+            {
+              "name": "Unfollow Playlist",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "disabled": false,
+                    "type": "default"
+                  }
+                ],
+                "auth": {
+                  "type": "noauth"
+                },
+                "description": "Remove the current user as a follower of a playlist.",
+                "url": {
+                  "raw": "{{base_url}}/playlists/{{playlist_id}}/followers",
+                  "protocol": "",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "playlists",
+                    "{{playlist_id}}",
+                    "followers"
+                  ],
+                  "query": [],
+                  "variable": []
                 }
               }
             }

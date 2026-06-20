@@ -9,6 +9,62 @@ interface ApiReferenceProps {
   onToggleMobileSidebar?: () => void;
 }
 
+function getRequiredScope(method: string, path: string): string {
+  const cleanPath = path.toLowerCase();
+  const cleanMethod = method.toUpperCase();
+
+  // Player / Playback Scopes
+  if (cleanPath.startsWith("/me/player")) {
+    if (cleanMethod === "GET") {
+      if (cleanPath.includes("/currently-playing")) {
+        return "user-read-currently-playing";
+      }
+      if (cleanPath.includes("/recently-played")) {
+        return "user-read-recently-played";
+      }
+      return "user-read-playback-state";
+    }
+    return "user-modify-playback-state";
+  }
+
+  // Top Items
+  if (cleanPath.startsWith("/me/top")) {
+    return "user-top-read";
+  }
+
+  // User Follow Scopes
+  if (cleanPath.startsWith("/me/following")) {
+    if (cleanMethod === "GET") {
+      return "user-follow-read";
+    }
+    return "user-follow-modify";
+  }
+
+  // User Library Scopes
+  if (cleanPath.startsWith("/me/library") || cleanPath.startsWith("/me/tracks") || cleanPath.startsWith("/me/albums")) {
+    if (cleanMethod === "GET") {
+      return "user-library-read";
+    }
+    return "user-library-modify";
+  }
+
+  // Playlist Scopes
+  if (cleanPath.startsWith("/playlists") || cleanPath.startsWith("/me/playlists")) {
+    if (cleanMethod === "GET") {
+      return "playlist-read-private";
+    }
+    return "playlist-modify-public, playlist-modify-private";
+  }
+
+  // User Profile
+  if (cleanPath === "/me") {
+    return "user-read-private, user-read-email";
+  }
+
+  // Open / Catalog Metadata
+  return "No Scope Required";
+}
+
 export default function ApiReference({ enableDeprecatedApis, onToggleMobileSidebar }: ApiReferenceProps) {
   const preferences = loadPreferences();
   const [openSection, setOpenSection] = useState<string>(preferences.apiOpenSection || "User Profiles & Activity");
@@ -196,7 +252,7 @@ export default function ApiReference({ enableDeprecatedApis, onToggleMobileSideb
                               <div className="flex items-center gap-2">
                                 <span>Required OAuth Scope:</span>
                                 <span className="font-mono text-[#B3B3B3] bg-[#282828] px-2 py-0.5 rounded border border-[#383838]">
-                                  {ep.method === "GET" ? "user-read-private" : ep.path.includes("player") ? "user-modify-playback-state" : "playlist-modify-private"}
+                                  {getRequiredScope(ep.method, ep.path)}
                                 </span>
                               </div>
                             </div>
