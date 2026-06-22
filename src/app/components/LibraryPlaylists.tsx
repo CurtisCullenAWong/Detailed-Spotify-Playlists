@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   ListMusic,
   Music2,
@@ -112,8 +113,21 @@ export default function LibraryPlaylists({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
-      if (groupRef.current && !groupRef.current.contains(e.target as Node)) setGroupOpen(false);
+      const target = e.target as HTMLElement;
+      if (
+        sortRef.current &&
+        !sortRef.current.contains(target) &&
+        !target.closest("[data-library-sort-menu]")
+      ) {
+        setSortOpen(false);
+      }
+      if (
+        groupRef.current &&
+        !groupRef.current.contains(target) &&
+        !target.closest("[data-library-group-menu]")
+      ) {
+        setGroupOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -306,9 +320,17 @@ export default function LibraryPlaylists({
             <Library size={11} />
             {groupKey !== "none" ? "Grouped" : "Group"}
           </button>
-          {groupOpen && groupDropdownPos && (
+          {groupOpen && groupDropdownPos && createPortal(
             <div
-              style={{ position: "fixed", top: groupDropdownPos.top, left: groupDropdownPos.left, zIndex: 9999 }}
+              data-library-group-menu
+              style={{
+                position: "fixed",
+                top: groupDropdownPos.top,
+                left: groupDropdownPos.left,
+                maxHeight: `calc(100vh - ${groupDropdownPos.top}px - 16px)`,
+                overflowY: "auto",
+                zIndex: 9999
+              }}
               className="w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl py-1">
               {(["none", ...PLAYLIST_GROUP_OPTIONS.map(option => option.key)] as PlGroupKey[]).map(opt => (
                 <button key={opt} onClick={() => { setGroupKey(opt); setGroupOpen(false); }}
@@ -317,7 +339,8 @@ export default function LibraryPlaylists({
                   {groupKey === opt && <Check size={10} />}
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
 
@@ -339,9 +362,17 @@ export default function LibraryPlaylists({
             <ArrowUpDown size={11} />
             <span>Sort{sortKey !== "none" && ` ${sortDir === "asc" ? "↑" : "↓"}`}</span>
           </button>
-          {sortOpen && sortDropdownPos && (
+          {sortOpen && sortDropdownPos && createPortal(
             <div
-              style={{ position: "fixed", top: sortDropdownPos.top, left: sortDropdownPos.left, zIndex: 9999 }}
+              data-library-sort-menu
+              style={{
+                position: "fixed",
+                top: sortDropdownPos.top,
+                left: sortDropdownPos.left,
+                maxHeight: `calc(100vh - ${sortDropdownPos.top}px - 16px)`,
+                overflowY: "auto",
+                zIndex: 9999
+              }}
               className="w-40 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl py-1">
               {(["none", ...PLAYLIST_SORT_OPTIONS.map(option => option.key)] as PlSortKey[]).map(opt => (
                 <button key={opt} onClick={() => { toggleSort(opt); setSortOpen(false); }}
@@ -351,7 +382,8 @@ export default function LibraryPlaylists({
                   {sortKey === opt && opt === "none" && <Check size={10} />}
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       </div>

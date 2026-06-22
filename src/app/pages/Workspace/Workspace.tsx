@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -69,7 +70,7 @@ const compareTracks = (a: Track, b: Track, key: SortKey, dir: SortDir): number =
   return dir === "asc" ? cmp : -cmp;
 };
 
-const GROUP_SORT_OPTIONS = [
+const GROUP_SORT_OPTIONS_ALL = [
   { id: "name", label: "Group Name" },
   { id: "count", label: "Track Count" },
   { id: "popularity", label: "Popularity" },
@@ -86,6 +87,24 @@ const GROUP_SORT_OPTIONS = [
   { id: "liveness", label: "Liveness" },
   { id: "loudness", label: "Loudness" },
 ];
+
+/** Returns the sort-groups-by options that are meaningful for a given group-by field. */
+const getGroupSortOptionsForField = (
+  field: GroupByOption,
+  enableDeprecatedApis: boolean
+): typeof GROUP_SORT_OPTIONS_ALL => {
+  // Always include these base options
+  const base = ["name", "count", "duration", "dateAdded"];
+
+  // "Release Date" as a sort key is redundant when the groups ARE years
+  if (field !== "releaseYear") base.push("releaseDate");
+
+  // Deprecated audio-feature options
+  const deprecated = ["popularity", "bpm", "energy", "danceability", "valence", "acousticness", "instrumentalness", "speechiness", "liveness", "loudness"];
+
+  const allowed = new Set([...base, ...(enableDeprecatedApis ? deprecated : [])]);
+  return GROUP_SORT_OPTIONS_ALL.filter(opt => allowed.has(opt.id));
+};
 
 const compareGroups = (
   labelA: string,
@@ -247,6 +266,17 @@ export default function Workspace({
   const [showOverlap, setShowOverlap] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+  // Dropdown refs and position state for portaling
+  const groupByBtnRef = useRef<HTMLButtonElement>(null);
+  const subGroupByBtnRef = useRef<HTMLButtonElement>(null);
+  const columnsBtnRef = useRef<HTMLButtonElement>(null);
+  const playlistFlyoutBtnRef = useRef<HTMLButtonElement>(null);
+
+  const [groupByDropdownPos, setGroupByDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [subGroupByDropdownPos, setSubGroupByDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [columnsDropdownPos, setColumnsDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [playlistFlyoutDropdownPos, setPlaylistFlyoutDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const [createModalTrackUris, setCreateModalTrackUris] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>(preferences.workspaceGroupBy);
   const [groupByDir, setGroupByDir] = useState<SortDir>(preferences.workspaceGroupByDir ?? "asc");
@@ -319,11 +349,12 @@ export default function Workspace({
   const GROUPABLE_COLUMNS = React.useMemo(() => ALL_COLUMNS.filter((column) => column.groupable), []);
 
   const visibleGroupSortOptions = React.useMemo(() => {
-    return GROUP_SORT_OPTIONS.filter(opt => {
-      if (opt.id === "name" || opt.id === "count" || opt.id === "releaseDate" || opt.id === "dateAdded" || opt.id === "duration") return true;
-      return enableDeprecatedApis;
-    });
-  }, [enableDeprecatedApis]);
+    return getGroupSortOptionsForField(groupBy === "none" ? "artist" : groupBy, enableDeprecatedApis);
+  }, [groupBy, enableDeprecatedApis]);
+
+  const visibleSubGroupSortOptions = React.useMemo(() => {
+    return getGroupSortOptionsForField(subGroupBy === "none" ? "artist" : subGroupBy, enableDeprecatedApis);
+  }, [subGroupBy, enableDeprecatedApis]);
 
   const activeColumnsCount = React.useMemo(() => {
     return columnOrder
@@ -363,6 +394,21 @@ export default function Workspace({
       return changed ? next : prev;
     });
   }, [groupBy, subGroupBy]);
+
+  // Reset sort keys when they're no longer valid for the chosen group-by field
+  useEffect(() => {
+    const groupOpts = getGroupSortOptionsForField(groupBy === "none" ? "artist" : groupBy, enableDeprecatedApis);
+    if (!groupOpts.some(o => o.id === groupBySortKey)) {
+      setGroupBySortKey("name");
+    }
+  }, [groupBy, enableDeprecatedApis, groupBySortKey]);
+
+  useEffect(() => {
+    const subOpts = getGroupSortOptionsForField(subGroupBy === "none" ? "artist" : subGroupBy, enableDeprecatedApis);
+    if (!subOpts.some(o => o.id === subGroupBySortKey)) {
+      setSubGroupBySortKey("name");
+    }
+  }, [subGroupBy, enableDeprecatedApis, subGroupBySortKey]);
 
   const activePlaylist = playlists.find(p => String(p.id) === String(selectedPlaylistId));
   const currentPlaylistKey = String(selectedPlaylistId);
@@ -643,7 +689,9 @@ export default function Workspace({
     if (!columnsOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-cols-dropdown]")) setColumnsOpen(false);
+      if (!target.closest("[data-cols-dropdown]") && !target.closest("[data-cols-menu]")) {
+        setColumnsOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -653,7 +701,7 @@ export default function Workspace({
     if (!groupByOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-groupby-dropdown]")) {
+      if (!target.closest("[data-groupby-dropdown]") && !target.closest("[data-groupby-menu]")) {
         setGroupByOpen(false);
       }
     };
@@ -665,7 +713,7 @@ export default function Workspace({
     if (!subGroupByOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-subgroupby-dropdown]")) {
+      if (!target.closest("[data-subgroupby-dropdown]") && !target.closest("[data-subgroupby-menu]")) {
         setSubGroupByOpen(false);
       }
     };
@@ -677,7 +725,9 @@ export default function Workspace({
     if (!playlistFlyoutOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest("[data-playlist-flyout]")) setPlaylistFlyoutOpen(false);
+      if (!target.closest("[data-playlist-flyout]") && !target.closest("[data-playlist-menu]")) {
+        setPlaylistFlyoutOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -1168,7 +1218,7 @@ export default function Workspace({
       const dirLabel = getGroupSortDirLabel(sortKey, dir, field);
       return `${fieldLabel} (${dirLabel})`;
     }
-    const sortKeyLabel = GROUP_SORT_OPTIONS.find(o => o.id === sortKey)?.label || sortKey;
+    const sortKeyLabel = GROUP_SORT_OPTIONS_ALL.find((o: { id: string; label: string }) => o.id === sortKey)?.label || sortKey;
     const dirLabel = getGroupSortDirLabel(sortKey, dir, field);
     if (sortKey === "name") {
       return `${fieldLabel} (${dirLabel})`;
@@ -1313,7 +1363,7 @@ export default function Workspace({
               {selected.size > 0 && (
                 <>
                   {(isYours || isEditable) && <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />}
-                  
+
                   <span className="text-xs text-[#B3B3B3] font-bold px-3 select-none">
                     {selected.size} selected
                   </span>
@@ -1343,16 +1393,15 @@ export default function Workspace({
                           hasUnsavedTrackOrder
                             ? "Please save your custom track order before removing duplicates"
                             : !hasDuplicates
-                            ? "No duplicate tracks found in this playlist"
-                            : "Remove duplicate tracks, keeping the first occurrence of each"
+                              ? "No duplicate tracks found in this playlist"
+                              : "Remove duplicate tracks, keeping the first occurrence of each"
                         }
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
-                          isRemovingDuplicates
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${isRemovingDuplicates
                             ? "bg-[#e91429] text-white cursor-wait"
                             : hasDuplicates && !hasUnsavedTrackOrder
-                            ? "hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 cursor-pointer font-bold"
-                            : "text-[#535353] cursor-not-allowed"
-                        }`}
+                              ? "hover:bg-[#e91429]/10 text-[#e91429] hover:text-red-400 cursor-pointer font-bold"
+                              : "text-[#535353] cursor-not-allowed"
+                          }`}
                       >
                         <Trash2 size={12} className={isRemovingDuplicates ? "animate-pulse" : ""} />
                         <span>Remove Duplicates</span>
@@ -1363,15 +1412,32 @@ export default function Workspace({
                   <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
                   <div className="relative" data-playlist-flyout>
                     <button
-                      onClick={() => setPlaylistFlyoutOpen(o => !o)}
+                      ref={playlistFlyoutBtnRef}
+                      onClick={() => {
+                        if (!playlistFlyoutOpen) {
+                          const rect = playlistFlyoutBtnRef.current?.getBoundingClientRect();
+                          if (rect) setPlaylistFlyoutDropdownPos({ top: rect.bottom + 4, left: rect.left });
+                        }
+                        setPlaylistFlyoutOpen(o => !o);
+                      }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-white/5 text-white text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
                     >
                       <Plus size={12} />
                       <span>Add to Playlist</span>
                       <ChevronDown size={10} className={`transition-transform duration-200 ${playlistFlyoutOpen ? "rotate-180" : ""}`} />
                     </button>
-                    {playlistFlyoutOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 overflow-hidden">
+                    {playlistFlyoutOpen && playlistFlyoutDropdownPos && createPortal(
+                      <div
+                        data-playlist-menu
+                        style={{
+                          position: "fixed",
+                          top: playlistFlyoutDropdownPos.top,
+                          left: playlistFlyoutDropdownPos.left,
+                          maxHeight: `calc(100vh - ${playlistFlyoutDropdownPos.top}px - 16px)`,
+                          overflowY: "auto",
+                          zIndex: 9999
+                        }}
+                        className="w-64 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl overflow-hidden">
                         <div className="px-4 py-2.5 border-b border-[#383838]">
                           <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Add {selected.size} track{selected.size > 1 ? "s" : ""} to…</p>
                         </div>
@@ -1414,7 +1480,8 @@ export default function Workspace({
                             ))
                           )}
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
                   </div>
                 </>
@@ -1425,11 +1492,10 @@ export default function Workspace({
           <button
             type="button"
             onClick={() => setShowOverlap(o => !o)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${
-              showOverlap
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${showOverlap
                 ? "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/40 font-bold hover:bg-[#1DB954]/25"
                 : "bg-[#282828] text-white/90 border-[#3e3e3e]/80 hover:bg-white/5 hover:text-white"
-            }`}
+              }`}
           >
             <Copy size={12} className={showOverlap ? "text-[#1DB954]" : "text-white/70"} />
             <span>Show Song Overlap</span>
@@ -1456,7 +1522,14 @@ export default function Workspace({
           <div className="flex flex-wrap items-center bg-[#282828] border border-[#3e3e3e]/80 rounded-2xl sm:rounded-full p-0.5 shadow-md">
             <div className="relative" data-groupby-dropdown>
               <button
-                onClick={() => setGroupByOpen(o => !o)}
+                ref={groupByBtnRef}
+                onClick={() => {
+                  if (!groupByOpen) {
+                    const rect = groupByBtnRef.current?.getBoundingClientRect();
+                    if (rect) setGroupByDropdownPos({ top: rect.bottom + 4, left: rect.left });
+                  }
+                  setGroupByOpen(o => !o);
+                }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${groupByOpen
                   ? "bg-[#333333] text-white"
                   : groupBy !== "none"
@@ -1473,9 +1546,18 @@ export default function Workspace({
                 </span>
                 <ChevronDown size={10} className={`transition-transform duration-200 ${groupByOpen ? "rotate-180" : ""}`} />
               </button>
-              {groupByOpen && (
+              {groupByOpen && groupByDropdownPos && createPortal(
                 <div
-                  className="absolute top-full left-0 mt-1 w-56 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
+                  data-groupby-menu
+                  style={{
+                    position: "fixed",
+                    top: groupByDropdownPos.top,
+                    left: groupByDropdownPos.left,
+                    maxHeight: `calc(100vh - ${groupByDropdownPos.top}px - 16px)`,
+                    overflowY: "auto",
+                    zIndex: 9999
+                  }}
+                  className="w-56 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] py-1"
                 >
                   <div className="px-3 py-1.5 border-b border-[#383838] mb-1">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
@@ -1562,7 +1644,8 @@ export default function Workspace({
                       </button>
                     </>
                   )}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 
@@ -1571,7 +1654,14 @@ export default function Workspace({
                 <div className="w-px h-3.5 bg-[#3e3e3e]/80 mx-1 hidden sm:block" />
                 <div className="relative" data-subgroupby-dropdown>
                   <button
-                    onClick={() => setSubGroupByOpen(o => !o)}
+                    ref={subGroupByBtnRef}
+                    onClick={() => {
+                      if (!subGroupByOpen) {
+                        const rect = subGroupByBtnRef.current?.getBoundingClientRect();
+                        if (rect) setSubGroupByDropdownPos({ top: rect.bottom + 4, left: rect.left });
+                      }
+                      setSubGroupByOpen(o => !o);
+                    }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${subGroupByOpen
                       ? "bg-[#333333] text-white"
                       : subGroupBy !== "none"
@@ -1588,9 +1678,18 @@ export default function Workspace({
                     </span>
                     <ChevronDown size={10} className={`transition-transform duration-200 ${subGroupByOpen ? "rotate-180" : ""}`} />
                   </button>
-                  {subGroupByOpen && (
+                  {subGroupByOpen && subGroupByDropdownPos && createPortal(
                     <div
-                      className="absolute top-full left-0 mt-1 w-56 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
+                      data-subgroupby-menu
+                      style={{
+                        position: "fixed",
+                        top: subGroupByDropdownPos.top,
+                        left: subGroupByDropdownPos.left,
+                        maxHeight: `calc(100vh - ${subGroupByDropdownPos.top}px - 16px)`,
+                        overflowY: "auto",
+                        zIndex: 9999
+                      }}
+                      className="w-56 bg-[#282828] rounded-lg shadow-2xl border border-[#383838] z-50 py-1"
                     >
                       <div className="px-3 py-1.5 border-b border-[#383838] mb-1">
                         <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
@@ -1636,7 +1735,7 @@ export default function Workspace({
                             Sort Sub-groups By
                           </div>
                           <div className="max-h-40 overflow-y-auto">
-                            {visibleGroupSortOptions.map(opt => (
+                            {visibleSubGroupSortOptions.map(opt => (
                               <button
                                 key={opt.id}
                                 onClick={() => {
@@ -1673,7 +1772,8 @@ export default function Workspace({
                           </button>
                         </>
                       )}
-                    </div>
+                    </div>,
+                    document.body
                   )}
                 </div>
               </>
@@ -1683,7 +1783,14 @@ export default function Workspace({
 
             <div className="relative" data-cols-dropdown>
               <button
-                onClick={() => setColumnsOpen(o => !o)}
+                ref={columnsBtnRef}
+                onClick={() => {
+                  if (!columnsOpen) {
+                    const rect = columnsBtnRef.current?.getBoundingClientRect();
+                    if (rect) setColumnsDropdownPos({ top: rect.bottom + 4, left: rect.right - 192 });
+                  }
+                  setColumnsOpen(o => !o);
+                }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${columnsOpen
                   ? "bg-white text-black"
                   : "text-[#B3B3B3] hover:text-white hover:bg-white/5"
@@ -1693,8 +1800,18 @@ export default function Workspace({
                 <span>Columns</span>
                 <ChevronDown size={10} className={`transition-transform duration-200 ${columnsOpen ? "rotate-180" : ""}`} />
               </button>
-              {columnsOpen && (
-                <div className="absolute top-full right-0 mt-1 w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl z-50 py-1 overflow-hidden flex flex-col">
+              {columnsOpen && columnsDropdownPos && createPortal(
+                <div
+                  data-cols-menu
+                  style={{
+                    position: "fixed",
+                    top: columnsDropdownPos.top,
+                    left: columnsDropdownPos.left,
+                    maxHeight: `calc(100vh - ${columnsDropdownPos.top}px - 16px)`,
+                    overflowY: "auto",
+                    zIndex: 9999
+                  }}
+                  className="w-48 bg-[#282828] rounded-lg border border-[#383838] shadow-2xl py-1 overflow-hidden flex flex-col">
                   <div className="px-4 py-2 border-b border-[#383838] shrink-0">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-[#B3B3B3]">Toggle Columns</p>
                   </div>
@@ -1708,7 +1825,8 @@ export default function Workspace({
                       </button>
                     ))}
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 
@@ -1875,7 +1993,7 @@ export default function Workspace({
                               return (
                                 <td key={colId} className="px-3 py-2.5">
                                   <div className={`flex items-center gap-3 ${isNested ? "pl-6" : ""}`}>
-                                    <div 
+                                    <div
                                       onClick={(e) => { e.stopPropagation(); onNavigateToTrack(track.id); }}
                                       className="w-9 h-9 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
                                     >
@@ -1886,13 +2004,13 @@ export default function Workspace({
                                       )}
                                     </div>
                                     <div className="min-w-0 flex flex-col">
-                                      <div 
+                                      <div
                                         onClick={(e) => { e.stopPropagation(); onNavigateToTrack(track.id); }}
                                         className="cursor-pointer hover:underline hover:text-[#1DB954] transition-colors"
                                       >
                                         <TextCarousel text={track.title} className="text-white text-[13px] font-semibold max-w-[300px]" />
                                       </div>
-                                      <div 
+                                      <div
                                         onClick={(e) => {
                                           if (track.artistId) {
                                             e.stopPropagation();
@@ -1919,7 +2037,7 @@ export default function Workspace({
                               const displayArtist = (track.artist || "").split(",")[0].trim();
                               return (
                                 <td key={colId} className="px-3 py-2.5">
-                                  <div 
+                                  <div
                                     onClick={(e) => {
                                       if (track.artistId) {
                                         e.stopPropagation();
@@ -1936,7 +2054,7 @@ export default function Workspace({
                             if (colId === "artist") {
                               return (
                                 <td key={colId} className="px-3 py-2.5">
-                                  <div 
+                                  <div
                                     onClick={(e) => {
                                       if (track.artistId) {
                                         e.stopPropagation();
@@ -1953,7 +2071,7 @@ export default function Workspace({
                             if (colId === "album") {
                               return (
                                 <td key={colId} className="px-3 py-2.5">
-                                  <div 
+                                  <div
                                     onClick={(e) => {
                                       if (track.albumId) {
                                         e.stopPropagation();
