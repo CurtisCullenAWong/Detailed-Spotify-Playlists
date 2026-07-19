@@ -22,7 +22,7 @@ export default function Login() {
 
         {/* Brand Icon/Logo */}
         <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center shadow-lg shadow-black/30 mb-6 group hover:scale-105 transition-all duration-300 overflow-hidden">
-          <img src="/favicon.png" alt="Logo" className="w-10 h-10 object-contain" />
+          <img src="./favicon.png" alt="Logo" className="w-10 h-10 object-contain" />
         </div>
 
         {/* Title & Description */}

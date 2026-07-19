@@ -82,7 +82,7 @@ export default function Sidebar({
     return (
       <aside className="hidden md:flex flex-col h-full w-[60px] shrink-0 bg-[#121212] border-r border-[#282828] select-none items-center py-4 gap-2 overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
         <button onClick={onToggleCollapse} aria-label="Toggle sidebar" className="w-9 h-9 flex items-center justify-center mb-2 shrink-0 hover:scale-105 transition-all overflow-hidden">
-          <img src="/favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
+          <img src="./favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
         </button>
         {NAV.map(({ icon: Icon, label, id }) => (
           <button key={label} onClick={() => setPage(id)} title={label}
@@ -194,7 +194,7 @@ export default function Sidebar({
         <div className="px-4 pt-4 pb-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 flex items-center justify-center shrink-0">
-              <img src="/favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
+              <img src="./favicon.png" alt="Logo" className="w-6 h-6 object-contain" />
             </div>
             <span className="text-white font-bold text-[15px] tracking-tight">Spotify Manager</span>
             
