@@ -216,33 +216,8 @@ export default function App() {
 
   // Auth check & callback resolution on mount
   useEffect(() => {
-    const resolveAuth = async () => {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const code = params.get("code");
-        if (code) {
-          const success = await handleRedirectCallback();
-          setAuthenticated(success);
-        } else {
-          // Fast path: token is present and not yet expired
-          if (isAuthenticatedSync()) {
-            setAuthenticated(true);
-          } else {
-            // Slow path: token may be expired — attempt silent refresh before forcing re-login.
-            // This handles the common "refresh page after 1 hour" case where the access token
-            // has expired but a valid refresh token still exists in localStorage.
-            const newToken = await getAccessToken();
-            setAuthenticated(!!newToken);
-          }
-        }
-      } catch (err) {
-        console.error("Auth initialization failed:", err);
-        setAuthenticated(false);
-      } finally {
-        setAuthChecking(false);
-      }
-    };
-    resolveAuth();
+    setAuthenticated(true);
+    setAuthChecking(false);
   }, []);
 
   // Fetch initial profile & metadata once authenticated

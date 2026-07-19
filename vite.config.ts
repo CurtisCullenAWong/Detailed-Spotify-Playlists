@@ -17,6 +17,7 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
+  base: './',
   envPrefix: ['VITE_', 'client_', 'scope'],
   server: {
     host: '0.0.0.0',
