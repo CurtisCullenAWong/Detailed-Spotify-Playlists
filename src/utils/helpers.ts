@@ -7,12 +7,14 @@ export const getTrackOrderKey = (track: Track): string => track.rowKey ?? String
 
 export const applyTrackOrder = (tracks: Track[], trackOrder: string[]): Track[] => {
   const trackMap = new Map(tracks.map(track => [getTrackOrderKey(track), track] as const));
-  const ordered = trackOrder.map(id => trackMap.get(id)).filter(Boolean) as Track[];
-  const orderedIds = new Set(trackOrder);
+  const ordered = trackOrder.map(id => trackMap.get(id)).filter((t): t is Track => t !== undefined && t !== null);
+  const orderedKeys = new Set(ordered.map(getTrackOrderKey));
 
   for (const track of tracks) {
-    if (!orderedIds.has(getTrackOrderKey(track))) {
+    const key = getTrackOrderKey(track);
+    if (!orderedKeys.has(key)) {
       ordered.push(track);
+      orderedKeys.add(key);
     }
   }
 

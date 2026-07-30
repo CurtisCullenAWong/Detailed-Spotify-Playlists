@@ -368,6 +368,7 @@ export async function enrichTracks(tracks: any[], signal?: AbortSignal): Promise
 
     return {
       id: t.id,
+      rowKey: t.rowKey,
       title: t.name,
       artist: t.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
       artistId: primaryArtistId,
@@ -479,6 +480,43 @@ export async function getPlaylistTracks(
   
   if (onStream) return accumulated;
   return await enrichTracks(items, signal);
+}
+
+// 3.1 Fetch a single page of tracks for view-based / lazy loading
+export async function getPlaylistTracksPage(
+  playlistId: string | number,
+  offset: number = 0,
+  limit: number = 50,
+  signal?: AbortSignal
+): Promise<{ items: Track[]; total: number; hasMore: boolean }> {
+  const path = playlistId === "liked"
+    ? `/me/tracks?limit=${limit}&offset=${offset}`
+    : `/playlists/${playlistId}/items?limit=${limit}&offset=${offset}`;
+
+  const data = await spotifyFetch(path, { signal });
+  if (!data?.items) {
+    return { items: [], total: 0, hasMore: false };
+  }
+
+  const total = typeof data.total === "number" ? data.total : 0;
+
+  const rawItems: any[] = [];
+  data.items.forEach((i: any, index: number) => {
+    if (i == null) return;
+    const track = playlistId === "liked" ? i.track : (i.track ?? i.item ?? null);
+    if (track && track.id && track.name) {
+      rawItems.push({
+        ...track,
+        added_at: i.added_at,
+        rowKey: `${String(playlistId)}:${offset + index}`,
+      });
+    }
+  });
+
+  const enriched = await enrichTracks(rawItems, signal);
+  const hasMore = offset + data.items.length < total;
+
+  return { items: enriched, total, hasMore };
 }
 
 // 3a. Fetch raw (un-enriched) track items for a single playlist — fully paginated

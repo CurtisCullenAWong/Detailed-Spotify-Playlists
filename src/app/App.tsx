@@ -7,6 +7,7 @@ import {
   getCurrentUser,
   getUserPlaylists,
   getPlaylistTracks,
+  getPlaylistTracksPage,
   getMultiPlaylistTracks,
   getLikedSongsCount,
   getRecentlyPlayed,
@@ -76,6 +77,10 @@ export default function App() {
   const [playbackState, setPlaybackState] = useState<any>(null);
   const playbackStateRef = useRef<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const [hasMoreTracks, setHasMoreTracks] = useState<boolean>(false);
+  const [currentTrackOffset, setCurrentTrackOffset] = useState<number>(0);
+  const loadingMoreRef = useRef<boolean>(false);
 
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
@@ -199,9 +204,16 @@ export default function App() {
     PreferenceUpdaters.setSelectedPlaylistId(selectedPlaylistId);
   }, [selectedPlaylistId]);
 
-  const updatePlaylistTracks = (updater: React.SetStateAction<Track[]>, playlistKey?: string) => {
+  const updatePlaylistTracks = useCallback((updater: React.SetStateAction<Track[]>, playlistKey?: string, forSessionId?: number) => {
+    if (forSessionId !== undefined && workspaceLoadSessionRef.current !== forSessionId) {
+      return;
+    }
     const key = playlistKey || (String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic"));
+    const targetPlaylistId = key.replace(/-enriched$|-basic$/, "");
     setPlaylistTracks(prev => {
+      if (String(selectedPlaylistId) !== targetPlaylistId && forSessionId === undefined) {
+        return prev;
+      }
       const next = typeof updater === "function"
         ? (updater as (value: Track[]) => Track[])(prev)
         : updater;
@@ -212,7 +224,7 @@ export default function App() {
       writeWorkspaceTrackCache(playlistTrackCacheRef.current);
       return next;
     });
-  };
+  }, [selectedPlaylistId, enableDeprecatedApis]);
 
   // Auth check & callback resolution on mount
   useEffect(() => {
@@ -339,38 +351,57 @@ export default function App() {
         }
       };
 
+      // Always clear tracks state for new load session to prevent cross-playlist leaking
+      setPlaylistTracks([]);
+      setHasMoreTracks(false);
+      setCurrentTrackOffset(0);
+
       if (cachedTracks?.length && !forceRefreshRequested && cachedTracks[0].releaseDate !== undefined) {
         if (workspaceLoadSessionRef.current === loadSession) {
           setLoadingTracks(false);
         }
-        updatePlaylistTracks(cachedTracks, cacheKey);
+        updatePlaylistTracks(cachedTracks, cacheKey, loadSession);
         syncTrackCount(cachedTracks.length);
         return;
       }
 
       setLoadingTracks(true);
       setWorkspaceLoadProgress(0);
-      setPlaylistTracks([]);
+
       try {
         setDeprecatedApisEnabled(enableDeprecatedApis);
-        let tracks: Track[] = [];
-        if (selectedPlaylistId === "all_my") {
-          const myPlaylists = playlists.filter(p => p.owner === "yours");
-          tracks = await getMultiPlaylistTracks(["liked", ...myPlaylists.map(p => p.id)], setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
-        } else if (selectedPlaylistId === "all_followed") {
-          const followedPlaylists = playlists.filter(p => p.owner === "followed");
-          tracks = await getMultiPlaylistTracks(followedPlaylists.map(p => p.id), setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
-        } else if (selectedPlaylistId === "all_songs") {
-          tracks = await getMultiPlaylistTracks(["liked", ...playlists.map(p => p.id)], setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
+        if (isCompiledVirtualPlaylist) {
+          let tracks: Track[] = [];
+          if (selectedPlaylistId === "all_my") {
+            const myPlaylists = playlists.filter(p => p.owner === "yours");
+            tracks = await getMultiPlaylistTracks(["liked", ...myPlaylists.map(p => p.id)], setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey, loadSession));
+          } else if (selectedPlaylistId === "all_followed") {
+            const followedPlaylists = playlists.filter(p => p.owner === "followed");
+            tracks = await getMultiPlaylistTracks(followedPlaylists.map(p => p.id), setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey, loadSession));
+          } else if (selectedPlaylistId === "all_songs") {
+            tracks = await getMultiPlaylistTracks(["liked", ...playlists.map(p => p.id)], setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey, loadSession));
+          }
+          if (workspaceLoadSessionRef.current !== loadSession) {
+            return;
+          }
+          setWorkspaceLoadProgress(100);
+          updatePlaylistTracks(tracks, cacheKey, loadSession);
+          syncTrackCount(tracks.length);
+          setHasMoreTracks(false);
         } else {
-          tracks = await getPlaylistTracks(selectedPlaylistId, setWorkspaceLoadProgress, signal, (newTracks) => updatePlaylistTracks(newTracks, cacheKey));
+          // View-based paged loading: load initial page (50 tracks) fast for instant UI rendering
+          setWorkspaceLoadProgress(30);
+          const page0 = await getPlaylistTracksPage(selectedPlaylistId, 0, 50, signal);
+          if (workspaceLoadSessionRef.current !== loadSession) {
+            return;
+          }
+
+          updatePlaylistTracks(page0.items, cacheKey, loadSession);
+          setCurrentTrackOffset(page0.items.length);
+          setHasMoreTracks(page0.hasMore);
+          syncTrackCount(page0.total > 0 ? page0.total : page0.items.length);
+          setWorkspaceLoadProgress(page0.hasMore ? 60 : 100);
         }
-        if (workspaceLoadSessionRef.current !== loadSession) {
-          return;
-        }
-        setWorkspaceLoadProgress(100);
-        updatePlaylistTracks(tracks, cacheKey);
-        syncTrackCount(tracks.length);
       } catch (err: any) {
         if (err.name === "AbortError") {
           console.log("Track loading aborted for session:", loadSession);
@@ -390,7 +421,82 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [authenticated, page, selectedPlaylistId, playlists, enableDeprecatedApis, workspaceForceFetchToken]);
+  }, [authenticated, page, selectedPlaylistId, playlists, enableDeprecatedApis, workspaceForceFetchToken, updatePlaylistTracks]);
+
+  const handleLoadMoreTracks = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMoreTracks || page !== "workspace") return;
+    const isCompiledVirtualPlaylist = selectedPlaylistId === "all_my" || selectedPlaylistId === "all_followed" || selectedPlaylistId === "all_songs";
+    if (isCompiledVirtualPlaylist) return;
+
+    const loadSession = workspaceLoadSessionRef.current;
+    loadingMoreRef.current = true;
+    try {
+      const cacheKey = String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic");
+      const nextPage = await getPlaylistTracksPage(selectedPlaylistId, currentTrackOffset, 50);
+      if (workspaceLoadSessionRef.current !== loadSession) return;
+
+      setPlaylistTracks(prev => {
+        const combined = [...prev, ...nextPage.items];
+        playlistTrackCacheRef.current = {
+          ...playlistTrackCacheRef.current,
+          [cacheKey]: combined,
+        };
+        writeWorkspaceTrackCache(playlistTrackCacheRef.current);
+        return combined;
+      });
+      setCurrentTrackOffset(prev => prev + nextPage.items.length);
+      setHasMoreTracks(nextPage.hasMore);
+    } catch (err) {
+      console.warn("Failed to load next track page:", err);
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }, [hasMoreTracks, currentTrackOffset, selectedPlaylistId, enableDeprecatedApis, page]);
+
+  const handleEnsureAllTracksLoaded = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMoreTracks || page !== "workspace") return;
+    const isCompiledVirtualPlaylist = selectedPlaylistId === "all_my" || selectedPlaylistId === "all_followed" || selectedPlaylistId === "all_songs";
+    if (isCompiledVirtualPlaylist) return;
+
+    const loadSession = workspaceLoadSessionRef.current;
+    loadingMoreRef.current = true;
+    setLoadingTracks(true);
+    try {
+      const cacheKey = String(selectedPlaylistId) + (enableDeprecatedApis ? "-enriched" : "-basic");
+      let offset = currentTrackOffset;
+      let keepGoing = true;
+
+      while (keepGoing && workspaceLoadSessionRef.current === loadSession) {
+        const nextPage = await getPlaylistTracksPage(selectedPlaylistId, offset, 50);
+        if (workspaceLoadSessionRef.current !== loadSession) break;
+        if (nextPage.items.length === 0) break;
+
+        setPlaylistTracks(prev => {
+          const combined = [...prev, ...nextPage.items];
+          playlistTrackCacheRef.current = {
+            ...playlistTrackCacheRef.current,
+            [cacheKey]: combined,
+          };
+          writeWorkspaceTrackCache(playlistTrackCacheRef.current);
+          return combined;
+        });
+
+        offset += nextPage.items.length;
+        keepGoing = nextPage.hasMore;
+      }
+      if (workspaceLoadSessionRef.current === loadSession) {
+        setHasMoreTracks(false);
+        setCurrentTrackOffset(offset);
+      }
+    } catch (err) {
+      console.warn("Failed to complete fetching all tracks:", err);
+    } finally {
+      loadingMoreRef.current = false;
+      if (workspaceLoadSessionRef.current === loadSession) {
+        setLoadingTracks(false);
+      }
+    }
+  }, [hasMoreTracks, currentTrackOffset, selectedPlaylistId, enableDeprecatedApis, page]);
 
   // Player state polling (visibility-aware, adaptive interval, and playback-action triggered)
   useEffect(() => {
@@ -589,6 +695,9 @@ export default function App() {
               onNavigateToArtist={handleNavigateToArtist}
               onNavigateToTrack={handleNavigateToTrack}
               onNavigateToAlbum={handleNavigateToAlbum}
+              hasMoreTracks={hasMoreTracks}
+              onLoadMoreTracks={handleLoadMoreTracks}
+              onEnsureAllTracksLoaded={handleEnsureAllTracksLoaded}
             />
           )}
           {page === "api" && (

@@ -238,6 +238,9 @@ interface WorkspaceProps {
   onNavigateToArtist: (id: string) => void;
   onNavigateToTrack: (id: string | number) => void;
   onNavigateToAlbum: (id: string) => void;
+  hasMoreTracks?: boolean;
+  onLoadMoreTracks?: () => void;
+  onEnsureAllTracksLoaded?: () => void;
 }
 
 export default function Workspace({
@@ -259,6 +262,9 @@ export default function Workspace({
   onNavigateToArtist,
   onNavigateToTrack,
   onNavigateToAlbum,
+  hasMoreTracks,
+  onLoadMoreTracks,
+  onEnsureAllTracksLoaded,
 }: WorkspaceProps) {
   const preferences = loadPreferences();
 
@@ -655,6 +661,9 @@ export default function Workspace({
       (entries) => {
         if (entries[0].isIntersecting) {
           setVisibleRowCount(prev => prev + LAZY_ROW_STEP);
+          if (hasMoreTracks && onLoadMoreTracks) {
+            onLoadMoreTracks();
+          }
         }
       },
       { root, rootMargin: "200px", threshold: 0 }
@@ -662,7 +671,16 @@ export default function Workspace({
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [lazyTriggerRef.current, tableScrollRef.current]);
+  }, [lazyTriggerRef.current, tableScrollRef.current, hasMoreTracks, onLoadMoreTracks]);
+
+  // When searching, sorting, or grouping is active, automatically ensure all remaining playlist pages are fetched
+  useEffect(() => {
+    if (hasMoreTracks && onEnsureAllTracksLoaded) {
+      if (search.trim() !== "" || sortKey !== null || groupBy !== "none" || subGroupBy !== "none") {
+        onEnsureAllTracksLoaded();
+      }
+    }
+  }, [search, sortKey, groupBy, subGroupBy, hasMoreTracks, onEnsureAllTracksLoaded]);
 
   // Save workspace preferences when they change
   useEffect(() => {
